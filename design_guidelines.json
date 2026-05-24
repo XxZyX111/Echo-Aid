@@ -1,0 +1,93 @@
+{
+  "project": {
+    "name": "EchoAid",
+    "description": "Mental health platform for students and young professionals",
+    "theme": "light",
+    "archetype": "1 (Organic & Earthy)"
+  },
+  "typography": {
+    "heading": "Outfit",
+    "body": "Manrope",
+    "rules": {
+      "h1": "text-4xl sm:text-5xl lg:text-6xl tracking-tight font-medium",
+      "h2": "text-2xl sm:text-3xl lg:text-4xl tracking-tight font-medium",
+      "h3": "text-xl sm:text-2xl font-medium",
+      "h4": "text-lg sm:text-xl font-medium",
+      "body": "text-base leading-relaxed text-slate-700",
+      "label": "text-sm uppercase tracking-[0.2em]"
+    }
+  },
+  "colors": {
+    "primary": {
+      "DEFAULT": "#2D5F5F",
+      "hover": "#244C4C",
+      "foreground": "#FFFFFF"
+    },
+    "secondary": {
+      "DEFAULT": "#E8F0EA",
+      "hover": "#D8E6DD",
+      "foreground": "#1C302B"
+    },
+    "background": "#F4F7F4",
+    "surface": "#FFFFFF",
+    "accent": {
+      "DEFAULT": "#C06C5B",
+      "hover": "#A65A4B",
+      "foreground": "#FFFFFF"
+    },
+    "text": {
+      "primary": "#1C302B",
+      "secondary": "#4A635D",
+      "muted": "#7A9690"
+    },
+    "border": "#D8E6DD"
+  },
+  "spacing_and_layout": {
+    "container_padding": "p-6 sm:p-8 lg:p-12",
+    "border_radius": {
+      "card": "rounded-3xl",
+      "button": "rounded-full",
+      "input": "rounded-xl"
+    },
+    "shadows": {
+      "soft": "shadow-[0_8px_32px_rgba(45,95,95,0.06)]",
+      "floating": "shadow-[0_16px_48px_rgba(45,95,95,0.12)]"
+    },
+    "sidebar": "w-64 border-r border-[#D8E6DD] bg-white hidden md:flex flex-col",
+    "mobile_nav": "fixed bottom-0 left-0 right-0 bg-white border-t border-[#D8E6DD] md:hidden z-50"
+  },
+  "media": {
+    "login_background": "https://static.prod-images.emergentagent.com/jobs/7fb04be7-ed7d-415a-b6ee-6f602642e7b9/images/faf753668ffd08844cff92c988b6f98bddfaa4fc9adcc0a23682cfa1d636bc88.png",
+    "user_avatar": "https://static.prod-images.emergentagent.com/jobs/7fb04be7-ed7d-415a-b6ee-6f602642e7b9/images/cae4a84b4f820dfffa26e94765de3c6b836dda3ec59cffca36818667d4582b00.png",
+    "meditation_cover": "https://static.prod-images.emergentagent.com/jobs/7fb04be7-ed7d-415a-b6ee-6f602642e7b9/images/ad44a9a2c8ec2da2954b8b4a36af3f30d82378981d46b583ba43605b2cf79139.png",
+    "doctors": [
+      "https://images.unsplash.com/photo-1650728287460-37c20c1c6a30?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjAzMjV8MHwxfHNlYXJjaHwyfHxmcmllbmRseSUyMHBzeWNob2xvZ2lzdCUyMHBvcnRyYWl0fGVufDB8fHx8MTc3OTYxNzg1NXww&ixlib=rb-4.1.0&q=85",
+      "https://images.pexels.com/photos/3958409/pexels-photo-3958409.jpeg?auto=compress&cs=tinysrgb&dpr=2&h=650&w=940",
+      "https://images.pexels.com/photos/6712647/pexels-photo-6712647.jpeg?auto=compress&cs=tinysrgb&dpr=2&h=650&w=940"
+    ],
+    "park_maps": [
+      "https://images.unsplash.com/photo-1613370625437-f2956da172ef?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjY2NjV8MHwxfHNlYXJjaHwyfHxwZWFjZWZ1bCUyMHVyYmFuJTIwcGFyayUyMG5hdHVyZXxlbnwwfHx8fDE3Nzk2MTc4NTV8MA&ixlib=rb-4.1.0&q=85",
+      "https://images.pexels.com/photos/16605520/pexels-photo-16605520.jpeg?auto=compress&cs=tinysrgb&dpr=2&h=650&w=940"
+    ]
+  },
+  "component_guidelines": {
+    "cards": "Use bg-white with rounded-3xl and the defined soft shadow. No heavy borders. Internal padding p-6 or p-8.",
+    "buttons": "Primary buttons: bg-[#2D5F5F] text-white rounded-full. Secondary: bg-[#E8F0EA] text-[#1C302B] rounded-full. Add hover lift (-translate-y-0.5).",
+    "inputs": "Rounded-xl, bg-[#F4F7F4], border-transparent focus:border-[#2D5F5F] focus:ring-2 focus:ring-[#E8F0EA].",
+    "charts": "Use Shadcn charts (Recharts) with deep sage green (#2D5F5F) and terracotta (#C06C5B) lines.",
+    "map": "Use Leaflet (react-leaflet) for the Healing Maps page. Ensure map container is rounded-3xl.",
+    "icons": "Use lucide-react. Stroke width 1.5 for a delicate, premium feel.",
+    "testing": "All interactive elements MUST have data-testid attributes (e.g., data-testid='mood-button-grateful')."
+  },
+  "page_specific_instructions": {
+    "login_register": "Use the botanical background image as a split-screen cover or full-bleed with a glassmorphism card (bg-white/90 backdrop-blur-xl).",
+    "home_dashboard": "Sidebar on left. Main content grid: Top section for greeting and daily quote. Bento grid for Quick Mood Check-in (5 emojis), Consultation CTA, and Health Correlation chart.",
+    "journal_moodtracker": "Dual mode: Text and Voice. Voice mode requires a waveform animation (CSS or Framer Motion) and a prominent microphone button. Include a calendar (Emotional Landscape).",
+    "healing_maps": "Current mood summary on left, list of nearby sanctuaries (using park_maps images) with tags (Nature, Secluded). Right side is a live Leaflet map.",
+    "meditation": "Featured guide card 'Mastering the 4-7-8 Breathing' with the meditation_cover image. Play button overlaid.",
+    "consultation": "Search bar, horizontal scrollable category pills. Doctor profile cards with images from media.doctors array. Includes availability pills.",
+    "echochat": "Chat interface with AI (Dr. Nadia). Distinct message bubbles: teal for doctor, soft mint for user.",
+    "profile": "Use avatar_ryo. Sections for Sanctuary Preferences, Daily Routine, Privacy (Encryption, Biometric), Guardian Circle.",
+    "settings": "Clean list layout with toggle switches (Shadcn switch) for notifications and accessibility options."
+  }
+}
