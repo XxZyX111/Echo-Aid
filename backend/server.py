@@ -732,17 +732,41 @@ async def generate_supportive_response(content: str, mood: Optional[str], user_n
     return await chat.send_message(UserMessage(text=user_prompt))
 
 
-async def maybe_attach_ai_response(entry_doc: dict, user: dict) -> dict:
-    """If the entry shows distress, attach an ai_response. Best-effort, swallows errors."""
+async def _async_generate_and_save_ai_response(entry_id: str, user_id: str, content: str, mood: Optional[str], user_name: str):
+    """Background task: generate AI response and update the journal entry doc."""
+    try:
+        response = await generate_supportive_response(content, mood, user_name)
+        await db.journal_entries.update_one(
+            {"entry_id": entry_id, "user_id": user_id},
+            {"$set": {
+                "ai_response": response,
+                "ai_response_at": now_utc().isoformat(),
+                "ai_response_status": "ok",
+            }},
+        )
+    except Exception as e:
+        logger.exception(f"Async AI supportive response failed for {entry_id}: {e}")
+        await db.journal_entries.update_one(
+            {"entry_id": entry_id, "user_id": user_id},
+            {"$set": {"ai_response_status": "failed"}},
+        )
+
+
+def schedule_ai_response_if_distress(entry_doc: dict, user: dict) -> dict:
+    """Mark entry as pending if distressed, kick off background task. Non-blocking."""
     if not detect_distress(entry_doc.get("content", ""), entry_doc.get("mood")):
         return entry_doc
-    try:
-        name = user.get("nickname") or user.get("name") or "teman"
-        response = await generate_supportive_response(entry_doc.get("content", ""), entry_doc.get("mood"), name)
-        entry_doc["ai_response"] = response
-        entry_doc["ai_response_at"] = now_utc().isoformat()
-    except Exception as e:
-        logger.exception(f"AI supportive response failed: {e}")
+    entry_doc["ai_response_status"] = "pending"
+    name = user.get("nickname") or user.get("name") or "teman"
+    asyncio.create_task(
+        _async_generate_and_save_ai_response(
+            entry_doc["entry_id"],
+            user["user_id"],
+            entry_doc.get("content", ""),
+            entry_doc.get("mood"),
+            name,
+        )
+    )
     return entry_doc
 
 
@@ -773,10 +797,11 @@ async def create_mood(body: MoodIn, user: dict = Depends(get_current_user)):
             "linked_mood_id": entry["entry_id"],
             "created_at": now_utc().isoformat(),
         }
-        journal_doc = await maybe_attach_ai_response(journal_doc, user)
+        # Insert first, THEN schedule background AI response (non-blocking)
         await db.journal_entries.insert_one(journal_doc.copy())
         journal_doc.pop("_id", None)
-        # Backlink for retrieval
+        journal_doc = schedule_ai_response_if_distress(journal_doc, user)
+        # Backlink for retrieval (single update bundled into the insert path)
         await db.mood_entries.update_one(
             {"entry_id": entry["entry_id"]},
             {"$set": {"linked_journal_id": journal_doc["entry_id"]}},
@@ -805,9 +830,9 @@ async def create_journal(body: JournalIn, user: dict = Depends(get_current_user)
         "source": "journal",
         "created_at": now_utc().isoformat(),
     }
-    entry = await maybe_attach_ai_response(entry, user)
     await db.journal_entries.insert_one(entry.copy())
     entry.pop("_id", None)
+    entry = schedule_ai_response_if_distress(entry, user)
     return entry
 
 

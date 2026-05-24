@@ -24,6 +24,30 @@ function EntryItem({ entry, onUpdate }) {
   const badge = isMood ? "Mood" : entry.mode === "voice" ? "Voice" : "Text";
   const moodEmoji = entry.mood ? MOOD_EMOJI[entry.mood] : null;
   const moodChipClass = entry.mood ? MOOD_LABEL_BG[entry.mood] || "" : "";
+  const isPending = entry.ai_response_status === "pending" && !entry.ai_response;
+  const isFailed = entry.ai_response_status === "failed" && !entry.ai_response;
+
+  // Poll for AI response when pending
+  useEffect(() => {
+    if (!isPending) return;
+    let cancelled = false;
+    const poll = async () => {
+      for (let i = 0; i < 12 && !cancelled; i++) {
+        await new Promise((r) => setTimeout(r, 2000));
+        if (cancelled) return;
+        try {
+          const r = await api.get("/journal");
+          const fresh = (r.data.items || []).find((x) => x.entry_id === entry.entry_id);
+          if (fresh && (fresh.ai_response || fresh.ai_response_status !== "pending")) {
+            onUpdate?.(fresh);
+            return;
+          }
+        } catch {}
+      }
+    };
+    poll();
+    return () => { cancelled = true; };
+  }, [isPending, entry.entry_id]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const handleAi = async () => {
     setGenerating(true);
@@ -61,6 +85,20 @@ function EntryItem({ entry, onUpdate }) {
               </div>
               <p className="text-sm text-[#1C302B] mt-1.5 leading-relaxed whitespace-pre-wrap">{entry.ai_response}</p>
             </div>
+          ) : isPending ? (
+            <div className="mt-3 bg-[#F4F7F4] border-l-4 border-[#7A9690] rounded-xl p-3 flex items-center gap-2 text-xs text-[#4A635D]" data-testid={`ai-pending-${entry.entry_id}`}>
+              <Loader2 size={14} className="animate-spin text-[#2D5F5F]" />
+              Echo Companion sedang menulis respons supportif…
+            </div>
+          ) : isFailed ? (
+            <button
+              onClick={handleAi}
+              disabled={generating}
+              data-testid={`ai-retry-${entry.entry_id}`}
+              className="mt-2 inline-flex items-center gap-1.5 text-[11px] text-[#C06C5B] hover:underline"
+            >
+              <HeartHandshake size={12} /> Gagal generate. Coba lagi.
+            </button>
           ) : (
             (entry.content && entry.content.length > 12) && (
               <button

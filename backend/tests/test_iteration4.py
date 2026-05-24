@@ -112,10 +112,20 @@ class TestMoodResponseShape:
         journal = body["journal_entry"]
         assert journal is not None
         assert journal["source"] == "mood_checkin"
-        # Best-effort: ai_response should be present (mood='anxious' triggers detect_distress)
-        assert journal.get("ai_response"), f"expected ai_response for anxious mood: {journal}"
-        assert isinstance(journal["ai_response"], str) and len(journal["ai_response"].strip()) > 20
-        assert journal.get("ai_response_at"), "ai_response_at timestamp missing"
+        # iter4b: AI response is now async — initial response should be pending OR already populated
+        entry_id = journal["entry_id"]
+        deadline = time.time() + 30
+        final = journal
+        while time.time() < deadline:
+            if final.get("ai_response_status") == "ok" and final.get("ai_response"):
+                break
+            time.sleep(2)
+            jr = user_a.get(f"{API}/journal", timeout=20)
+            items = jr.json()["items"]
+            final = next((i for i in items if i["entry_id"] == entry_id), final)
+        assert final.get("ai_response"), f"expected ai_response after polling for anxious mood: {final}"
+        assert isinstance(final["ai_response"], str) and len(final["ai_response"].strip()) > 20
+        assert final.get("ai_response_at"), "ai_response_at timestamp missing"
 
 
 # ---------------- Journal: AI auto-attach + manual trigger ----------------
@@ -128,9 +138,20 @@ class TestJournalAIAttachment:
         assert r.status_code == 200, r.text
         entry = r.json()
         assert entry["source"] == "journal"
-        assert entry.get("ai_response"), f"expected ai_response: {entry}"
-        assert isinstance(entry["ai_response"], str) and len(entry["ai_response"].strip()) > 20
-        assert entry.get("ai_response_at")
+        # iter4b: AI response is now async — poll for completion
+        entry_id = entry["entry_id"]
+        deadline = time.time() + 30
+        final = entry
+        while time.time() < deadline:
+            if final.get("ai_response_status") == "ok" and final.get("ai_response"):
+                break
+            time.sleep(2)
+            jr = user_a.get(f"{API}/journal", timeout=20)
+            items = jr.json()["items"]
+            final = next((i for i in items if i["entry_id"] == entry_id), final)
+        assert final.get("ai_response"), f"expected ai_response after polling: {final}"
+        assert isinstance(final["ai_response"], str) and len(final["ai_response"].strip()) > 20
+        assert final.get("ai_response_at")
 
     def test_journal_neutral_content_no_ai(self, user_a):
         body = {"mode": "text", "content": "Today I had coffee with a friend at the cafe.", "mood": "neutral"}

@@ -82,12 +82,16 @@ export default function Home() {
     setSaving(true);
     try {
       const { data } = await api.post("/mood", { mood: selectedMood, note });
-      const moodEntry = data.entry || data; // backward-compat
+      const moodEntry = data.entry || data;
       setMoods((m) => [moodEntry, ...m]);
       setSelectedMood(null);
       setNote("");
       if (data.journal_entry) {
-        toast.success("Mood + curhatan tersimpan ke Journal 🌿");
+        if (data.journal_entry.ai_response_status === "pending") {
+          toast.success("Mood + curhatan tersimpan. Echo Companion sedang menulis respons…");
+        } else {
+          toast.success("Mood + curhatan tersimpan ke Journal 🌿");
+        }
       } else {
         toast.success("Mood tersimpan di sanctuary 🌿");
       }
