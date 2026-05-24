@@ -34,9 +34,9 @@ export function AuthProvider({ children }) {
   };
 
   const register = async (payload) => {
+    // Register no longer auto-logs-in (email verification required)
     const { data } = await api.post("/auth/register", payload);
-    setUser(data.user);
-    return data.user;
+    return data;
   };
 
   const logout = async () => {

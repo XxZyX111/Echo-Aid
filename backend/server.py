@@ -7,13 +7,18 @@ load_dotenv(ROOT_DIR / ".env")
 import os
 import uuid
 import logging
+import secrets
+import asyncio
+import math
+import json
 from datetime import datetime, timezone, timedelta
-from typing import List, Optional, Literal
+from typing import List, Optional, Literal, Dict
 
 import bcrypt
 import jwt
 import requests
-from fastapi import FastAPI, APIRouter, HTTPException, Depends, Request, Response, UploadFile, File, Form
+import resend
+from fastapi import FastAPI, APIRouter, HTTPException, Depends, Request, Response, UploadFile, File, Form, WebSocket, WebSocketDisconnect
 from fastapi.responses import JSONResponse
 from starlette.middleware.cors import CORSMiddleware
 from motor.motor_asyncio import AsyncIOMotorClient
@@ -31,6 +36,11 @@ db = client[os.environ["DB_NAME"]]
 JWT_SECRET = os.environ["JWT_SECRET"]
 JWT_ALG = "HS256"
 EMERGENT_LLM_KEY = os.environ["EMERGENT_LLM_KEY"]
+FRONTEND_URL = os.environ.get("FRONTEND_URL", "http://localhost:3000")
+RESEND_API_KEY = os.environ.get("RESEND_API_KEY", "")
+SENDER_EMAIL = os.environ.get("SENDER_EMAIL", "onboarding@resend.dev")
+if RESEND_API_KEY:
+    resend.api_key = RESEND_API_KEY
 
 app = FastAPI(title="EchoAid API")
 api = APIRouter(prefix="/api")
@@ -87,6 +97,76 @@ def set_session_cookie(response: Response, session_token: str):
         max_age=7 * 24 * 60 * 60,
         path="/",
     )
+
+
+def haversine_km(lat1: float, lng1: float, lat2: float, lng2: float) -> float:
+    R = 6371.0
+    p1 = math.radians(lat1)
+    p2 = math.radians(lat2)
+    dp = math.radians(lat2 - lat1)
+    dl = math.radians(lng2 - lng1)
+    a = math.sin(dp / 2) ** 2 + math.cos(p1) * math.cos(p2) * math.sin(dl / 2) ** 2
+    return 2 * R * math.asin(math.sqrt(a))
+
+
+def _verification_email_html(name: str, link: str) -> str:
+    return f"""
+    <!doctype html>
+    <html><body style="margin:0;padding:0;background:#F4F7F4;font-family:Arial,Helvetica,sans-serif;color:#1C302B;">
+      <table width="100%" cellpadding="0" cellspacing="0" border="0"><tr><td align="center" style="padding:40px 16px;">
+        <table width="560" cellpadding="0" cellspacing="0" border="0" style="background:#FFFFFF;border-radius:24px;overflow:hidden;box-shadow:0 8px 32px rgba(45,95,95,0.08);">
+          <tr><td style="background:#2D5F5F;padding:28px 32px;color:#FFFFFF;">
+            <div style="font-size:11px;letter-spacing:3px;text-transform:uppercase;opacity:0.7;">EchoAid Sanctuary</div>
+            <div style="font-size:24px;font-weight:600;margin-top:4px;">Selamat datang, {name}!</div>
+          </td></tr>
+          <tr><td style="padding:32px;">
+            <p style="margin:0 0 14px;font-size:15px;line-height:1.7;color:#1C302B;">
+              Terima kasih sudah bergabung dengan <strong>EchoAid</strong> — sanctuary digital untuk kesehatan mental kamu.
+            </p>
+            <p style="margin:0 0 22px;font-size:15px;line-height:1.7;color:#4A635D;">
+              Klik tombol di bawah untuk memverifikasi email kamu. Link ini berlaku selama 24 jam.
+            </p>
+            <table cellpadding="0" cellspacing="0" border="0"><tr><td align="center" bgcolor="#2D5F5F" style="border-radius:999px;">
+              <a href="{link}" style="display:inline-block;padding:14px 28px;font-size:14px;font-weight:600;color:#FFFFFF;text-decoration:none;">Verifikasi Email Saya</a>
+            </td></tr></table>
+            <p style="margin:24px 0 0;font-size:12px;line-height:1.6;color:#7A9690;">
+              Jika tombol tidak bekerja, salin link ini: <br/>
+              <span style="word-break:break-all;color:#2D5F5F;">{link}</span>
+            </p>
+          </td></tr>
+          <tr><td style="padding:18px 32px;background:#F4F7F4;color:#7A9690;font-size:11px;">
+            Kamu menerima email ini karena baru saja mendaftar di EchoAid. Jika ini bukan kamu, abaikan saja email ini.
+          </td></tr>
+        </table>
+      </td></tr></table>
+    </body></html>
+    """
+
+
+async def send_verification_email(to_email: str, name: str, token: str) -> Dict[str, Optional[str]]:
+    """Returns dict with email_id and optional dev_link (when send failed in testing mode)."""
+    link = f"{FRONTEND_URL}/verify-email?token={token}"
+    is_testing = SENDER_EMAIL.endswith("@resend.dev")
+    if not RESEND_API_KEY:
+        logger.warning("RESEND_API_KEY not set — skipping email send")
+        logger.info(f"[DEV] Verification link for {to_email}: {link}")
+        return {"email_id": None, "dev_link": link if is_testing else None}
+    params = {
+        "from": f"EchoAid Sanctuary <{SENDER_EMAIL}>",
+        "to": [to_email],
+        "subject": "Verifikasi email kamu untuk EchoAid Sanctuary",
+        "html": _verification_email_html(name, link),
+    }
+    try:
+        result = await asyncio.to_thread(resend.Emails.send, params)
+        email_id = result.get("id") if isinstance(result, dict) else None
+        return {"email_id": email_id, "dev_link": None}
+    except Exception as e:
+        logger.exception(f"Failed to send verification email: {e}")
+        # Log link to console as fallback
+        logger.info(f"[FALLBACK] Verification link for {to_email}: {link}")
+        # In testing mode, surface dev link so the demo works without verified domain
+        return {"email_id": None, "dev_link": link if is_testing else None}
 
 
 def serialize(doc: dict) -> dict:
@@ -346,11 +426,21 @@ async def on_startup():
                     "role": "admin",
                     "password_hash": hash_password(admin_password),
                     "auth_provider": "password",
+                    "email_verified": True,
                     "avatar_url": "https://static.prod-images.emergentagent.com/jobs/7fb04be7-ed7d-415a-b6ee-6f602642e7b9/images/cae4a84b4f820dfffa26e94765de3c6b836dda3ec59cffca36818667d4582b00.png",
                     "settings": {},
                     "created_at": now_utc().isoformat(),
                 }
             )
+
+    # Ensure existing admin has email_verified=True (backfill)
+    if admin_email:
+        await db.users.update_one(
+            {"email": admin_email.lower()},
+            {"$set": {"email_verified": True}},
+        )
+
+    await db.email_verification_tokens.create_index("token", unique=True)
 
     # Seed doctors
     for d in DOCTORS_SEED:
@@ -362,6 +452,21 @@ async def on_startup():
 
 
 # ---------------------- Auth ----------------------
+async def _issue_verification_token(user_id: str, email: str, name: str):
+    token = secrets.token_urlsafe(32)
+    expires_at = (now_utc() + timedelta(hours=24)).isoformat()
+    await db.email_verification_tokens.insert_one({
+        "token": token,
+        "user_id": user_id,
+        "email": email,
+        "expires_at": expires_at,
+        "created_at": now_utc().isoformat(),
+        "used": False,
+    })
+    send_result = await send_verification_email(email, name, token)
+    return token, send_result
+
+
 @api.post("/auth/register")
 async def register(body: RegisterIn, response: Response):
     email = body.email.lower()
@@ -377,6 +482,7 @@ async def register(body: RegisterIn, response: Response):
         "role": "user",
         "password_hash": hash_password(body.password),
         "auth_provider": "password",
+        "email_verified": False,
         "avatar_url": "https://static.prod-images.emergentagent.com/jobs/7fb04be7-ed7d-415a-b6ee-6f602642e7b9/images/cae4a84b4f820dfffa26e94765de3c6b836dda3ec59cffca36818667d4582b00.png",
         "sanctuary_preferences": {"dark_mode": False, "daily_reminders": True},
         "daily_support_routine": [
@@ -398,9 +504,66 @@ async def register(body: RegisterIn, response: Response):
         "created_at": now_utc().isoformat(),
     }
     await db.users.insert_one(user)
-    token = create_access_token(user_id, email)
-    set_auth_cookie(response, token)
-    return {"user": serialize({**user}), "token": token}
+    # Issue verification token + send email (do NOT log in)
+    _, send_result = await _issue_verification_token(user_id, email, body.name)
+    payload = {
+        "ok": True,
+        "email": email,
+        "message": "Akun berhasil dibuat. Cek email kamu untuk verifikasi.",
+        "email_verified": False,
+    }
+    # In testing mode (no verified Resend domain), expose dev link so demo flows complete
+    if send_result.get("dev_link"):
+        payload["dev_verification_url"] = send_result["dev_link"]
+        payload["dev_mode_note"] = (
+            "Mode testing: Resend hanya mengirim email ke alamat terverifikasi. "
+            "Untuk demo, gunakan link di dev_verification_url. Verifikasi domain di resend.com/domains untuk produksi."
+        )
+    return payload
+
+
+@api.post("/auth/verify-email")
+async def verify_email(request: Request):
+    body = await request.json()
+    token = body.get("token", "").strip()
+    if not token:
+        raise HTTPException(status_code=400, detail="Token tidak valid")
+    doc = await db.email_verification_tokens.find_one({"token": token})
+    if not doc:
+        raise HTTPException(status_code=400, detail="Token tidak ditemukan atau sudah digunakan")
+    if doc.get("used"):
+        raise HTTPException(status_code=400, detail="Token sudah digunakan. Silakan login.")
+    expires_at = doc.get("expires_at")
+    if isinstance(expires_at, str):
+        expires_at = datetime.fromisoformat(expires_at)
+    if expires_at.tzinfo is None:
+        expires_at = expires_at.replace(tzinfo=timezone.utc)
+    if expires_at < now_utc():
+        raise HTTPException(status_code=400, detail="Token kadaluarsa. Minta link verifikasi baru.")
+    await db.users.update_one({"user_id": doc["user_id"]}, {"$set": {"email_verified": True}})
+    await db.email_verification_tokens.update_one({"token": token}, {"$set": {"used": True, "used_at": now_utc().isoformat()}})
+    return {"ok": True, "email": doc["email"]}
+
+
+@api.post("/auth/resend-verification")
+async def resend_verification(request: Request):
+    body = await request.json()
+    email = (body.get("email") or "").strip().lower()
+    if not email:
+        raise HTTPException(status_code=400, detail="Email wajib diisi")
+    user = await db.users.find_one({"email": email})
+    if not user:
+        # Don't leak existence
+        return {"ok": True}
+    if user.get("email_verified"):
+        return {"ok": True, "already_verified": True}
+    # Invalidate previous tokens for this user
+    await db.email_verification_tokens.update_many({"user_id": user["user_id"], "used": False}, {"$set": {"used": True}})
+    _, send_result = await _issue_verification_token(user["user_id"], email, user.get("name", "Sanctuary Member"))
+    payload = {"ok": True}
+    if send_result.get("dev_link"):
+        payload["dev_verification_url"] = send_result["dev_link"]
+    return payload
 
 
 @api.post("/auth/login")
@@ -411,6 +574,16 @@ async def login(body: LoginIn, response: Response):
         raise HTTPException(status_code=401, detail="Email atau password salah")
     if not verify_password(body.password, user["password_hash"]):
         raise HTTPException(status_code=401, detail="Email atau password salah")
+    if user.get("email_verified") is False:
+        # Block login until email is verified
+        raise HTTPException(
+            status_code=403,
+            detail={
+                "code": "email_not_verified",
+                "message": "Email belum diverifikasi. Cek inbox kamu atau kirim ulang link verifikasi.",
+                "email": email,
+            },
+        )
     token = create_access_token(user["user_id"], email)
     set_auth_cookie(response, token)
     return {"user": serialize(user), "token": token}
@@ -450,6 +623,7 @@ async def google_session(request: Request, response: Response):
             "university": "",
             "role": "user",
             "auth_provider": "google",
+            "email_verified": True,
             "avatar_url": picture or "https://static.prod-images.emergentagent.com/jobs/7fb04be7-ed7d-415a-b6ee-6f602642e7b9/images/cae4a84b4f820dfffa26e94765de3c6b836dda3ec59cffca36818667d4582b00.png",
             "sanctuary_preferences": {"dark_mode": False, "daily_reminders": True},
             "daily_support_routine": [
@@ -577,10 +751,17 @@ async def transcribe_journal(
 
 # ---------------------- Healing Map ----------------------
 @api.get("/healing/parks")
-async def list_parks(mood: Optional[str] = None):
+async def list_parks(mood: Optional[str] = None, lat: Optional[float] = None, lng: Optional[float] = None):
     cursor = db.parks.find({}, {"_id": 0})
     items = await cursor.to_list(50)
-    return {"items": items, "mood_hint": mood or "anxious"}
+    # If user shared geolocation, compute distances + sort
+    if lat is not None and lng is not None:
+        for it in items:
+            d = haversine_km(lat, lng, it.get("lat"), it.get("lng"))
+            it["distance_km"] = round(d, 2)
+            it["distance"] = f"{int(d * 1000)}m away" if d < 1 else f"{d:.1f}km away"
+        items.sort(key=lambda x: x.get("distance_km", 9999))
+    return {"items": items, "mood_hint": mood or "anxious", "user_lat": lat, "user_lng": lng}
 
 
 # ---------------------- Meditation ----------------------
@@ -719,6 +900,124 @@ async def chat_history(booking_id: str, user: dict = Depends(get_current_user)):
     cursor = db.chat_messages.find({"booking_id": booking_id, "user_id": user["user_id"]}, {"_id": 0}).sort("created_at", 1)
     items = await cursor.to_list(500)
     return {"booking": booking, "messages": items}
+
+
+# ---------------------- WebSocket Chat ----------------------
+@app.websocket("/api/ws/chat/{booking_id}")
+async def ws_chat(websocket: WebSocket, booking_id: str):
+    await websocket.accept()
+    # Authenticate via cookie or query param token
+    token = None
+    cookie_header = websocket.headers.get("cookie", "")
+    for part in cookie_header.split(";"):
+        part = part.strip()
+        if part.startswith("access_token="):
+            token = part[len("access_token="):]
+            break
+        if part.startswith("session_token="):
+            token = part[len("session_token="):]
+            break
+    if not token:
+        token = websocket.query_params.get("token")
+
+    user = await get_user_by_token(token) if token else None
+    if not user:
+        await websocket.send_json({"type": "error", "message": "Not authenticated"})
+        await websocket.close(code=1008)
+        return
+
+    booking = await db.bookings.find_one({"booking_id": booking_id, "user_id": user["user_id"]}, {"_id": 0})
+    if not booking:
+        await websocket.send_json({"type": "error", "message": "Booking not found"})
+        await websocket.close(code=1008)
+        return
+
+    await websocket.send_json({"type": "ready", "booking_id": booking_id})
+
+    # Per-connection chat session
+    system_prompt = _doctor_system_prompt(
+        booking["doctor_name"], booking["doctor_title"],
+        user.get("nickname") or user.get("name") or "teman",
+    )
+    chat = LlmChat(
+        api_key=EMERGENT_LLM_KEY,
+        session_id=booking_id,
+        system_message=system_prompt,
+    ).with_model("anthropic", "claude-sonnet-4-5-20250929")
+
+    try:
+        while True:
+            data = await websocket.receive_json()
+            msg_type = data.get("type")
+            if msg_type == "ping":
+                await websocket.send_json({"type": "pong"})
+                continue
+            if msg_type != "user_message":
+                continue
+            text = (data.get("content") or "").strip()
+            if not text:
+                continue
+
+            # Persist user message
+            user_msg = {
+                "message_id": f"msg_{uuid.uuid4().hex[:12]}",
+                "booking_id": booking_id,
+                "user_id": user["user_id"],
+                "role": "user",
+                "content": text,
+                "created_at": now_utc().isoformat(),
+            }
+            await db.chat_messages.insert_one(user_msg.copy())
+            user_msg.pop("_id", None)
+            await websocket.send_json({"type": "user_message", "message": user_msg})
+
+            # Typing indicator
+            await websocket.send_json({"type": "typing", "doctor_name": booking["doctor_name"]})
+
+            try:
+                ai_text = await chat.send_message(UserMessage(text=text))
+            except Exception as e:
+                logger.exception("Claude chat failed in WS")
+                await websocket.send_json({"type": "error", "message": "Pesan gagal diproses, coba lagi."})
+                continue
+
+            ai_msg_id = f"msg_{uuid.uuid4().hex[:12]}"
+            ai_created = now_utc().isoformat()
+
+            # Stream the response word by word (simulated streaming)
+            words = ai_text.split(" ")
+            buf = ""
+            for i, w in enumerate(words):
+                buf += (" " if i > 0 else "") + w
+                await websocket.send_json({
+                    "type": "ai_chunk",
+                    "message_id": ai_msg_id,
+                    "delta": (" " if i > 0 else "") + w,
+                    "content_so_far": buf,
+                })
+                # Small delay for streaming effect (~30 wpm visual)
+                await asyncio.sleep(0.03)
+
+            ai_msg = {
+                "message_id": ai_msg_id,
+                "booking_id": booking_id,
+                "user_id": user["user_id"],
+                "role": "assistant",
+                "content": ai_text,
+                "doctor_name": booking["doctor_name"],
+                "created_at": ai_created,
+            }
+            await db.chat_messages.insert_one(ai_msg.copy())
+            ai_msg.pop("_id", None)
+            await websocket.send_json({"type": "ai_message", "message": ai_msg})
+    except WebSocketDisconnect:
+        return
+    except Exception as e:
+        logger.exception(f"WebSocket error: {e}")
+        try:
+            await websocket.close()
+        except Exception:
+            pass
 
 
 # ---------------------- Profile & Settings ----------------------

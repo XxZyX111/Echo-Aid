@@ -1,7 +1,7 @@
 import React, { useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { useAuth } from "@/lib/auth";
-import { formatApiErrorDetail } from "@/lib/api";
+import { api, formatApiErrorDetail } from "@/lib/api";
 import { Mail, Lock, User, GraduationCap, Eye, EyeOff } from "lucide-react";
 import { toast } from "sonner";
 
@@ -32,15 +32,16 @@ export default function Register() {
     if (!form.agree) return setError("Mohon setujui Syarat Pengguna & Kebijakan Privasi");
     setLoading(true);
     try {
-      await register({
+      const { data } = await api.post("/auth/register", {
         name: form.name,
         nickname: form.nickname,
         email: form.email,
         password: form.password,
         university: form.university,
       });
-      toast.success("Sanctuary kamu sudah siap. Selamat datang!");
-      navigate("/");
+      toast.success("Sanctuary kamu sudah siap. Cek email untuk verifikasi.");
+      // Pass dev link if testing mode
+      navigate("/verify-email", { state: { email: data.email, devUrl: data.dev_verification_url, devNote: data.dev_mode_note } });
     } catch (err) {
       setError(formatApiErrorDetail(err.response?.data?.detail) || err.message);
     } finally {

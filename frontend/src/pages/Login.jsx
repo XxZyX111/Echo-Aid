@@ -23,7 +23,14 @@ export default function Login() {
       toast.success("Selamat datang kembali di Sanctuary");
       navigate("/");
     } catch (err) {
-      const msg = formatApiErrorDetail(err.response?.data?.detail) || err.message;
+      const detail = err.response?.data?.detail;
+      // Email not verified handling
+      if (detail && typeof detail === "object" && detail.code === "email_not_verified") {
+        toast.error("Email belum diverifikasi. Mengirim ulang link…");
+        navigate("/verify-email", { state: { email: detail.email, needsResend: true } });
+        return;
+      }
+      const msg = formatApiErrorDetail(detail) || err.message;
       setError(msg);
     } finally {
       setLoading(false);

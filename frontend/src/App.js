@@ -7,6 +7,7 @@ import "leaflet/dist/leaflet.css";
 
 import Login from "@/pages/Login";
 import Register from "@/pages/Register";
+import VerifyEmail from "@/pages/VerifyEmail";
 import AuthCallback from "@/pages/AuthCallback";
 import Layout from "@/components/Layout";
 import Home from "@/pages/Home";
@@ -42,6 +43,7 @@ function AppRouter() {
     <Routes>
       <Route path="/login" element={<Login />} />
       <Route path="/register" element={<Register />} />
+      <Route path="/verify-email" element={<VerifyEmail />} />
       <Route
         path="/"
         element={

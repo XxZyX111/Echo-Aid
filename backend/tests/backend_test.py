@@ -30,18 +30,32 @@ def admin_session():
 
 @pytest.fixture(scope="module")
 def new_user_session():
+    """Register, verify email (via dev_verification_url), then login. Returns authed session."""
+    import re as _re
     s = requests.Session()
     email = f"test_{uuid.uuid4().hex[:8]}@echoaid.com"
     pw = "Test@2026!"
-    r = s.post(
+    r = requests.post(
         f"{API}/auth/register",
         json={"name": "Test User", "nickname": "Tester", "email": email, "password": pw, "university": "UI"},
         timeout=20,
     )
     assert r.status_code == 200, f"register failed: {r.status_code} {r.text}"
     body = r.json()
-    assert body["user"]["email"] == email
-    assert "password_hash" not in body["user"]
+    assert body.get("ok") is True
+    assert body.get("email") == email
+    assert body.get("email_verified") is False
+    # In testing mode, dev_verification_url is surfaced
+    dev_url = body.get("dev_verification_url")
+    assert dev_url, f"expected dev_verification_url in register response: {body}"
+    m = _re.search(r"[?&]token=([^&]+)", dev_url)
+    assert m, f"could not parse token: {dev_url}"
+    vt = m.group(1)
+    vr = requests.post(f"{API}/auth/verify-email", json={"token": vt}, timeout=20)
+    assert vr.status_code == 200, vr.text
+    # Login -> sets access_token cookie
+    lr = s.post(f"{API}/auth/login", json={"email": email, "password": pw}, timeout=20)
+    assert lr.status_code == 200, lr.text
     assert "access_token" in s.cookies
     s.email = email  # type: ignore[attr-defined]
     s.password = pw  # type: ignore[attr-defined]
@@ -58,7 +72,7 @@ def test_root_health():
 # ---------------- Auth ----------------
 class TestAuth:
     def test_register_sets_cookie(self, new_user_session):
-        # Already registered in fixture
+        # After register+verify+login flow, cookie is set
         assert "access_token" in new_user_session.cookies
 
     def test_me_with_cookie(self, new_user_session):
@@ -90,9 +104,15 @@ class TestAuth:
         assert r.status_code == 400
 
     def test_logout_clears_cookie(self):
+        import re as _re
         s = requests.Session()
         email = f"logout_{uuid.uuid4().hex[:8]}@echoaid.com"
-        s.post(f"{API}/auth/register", json={"name": "L", "email": email, "password": "Test@2026!"}, timeout=10)
+        pw = "Test@2026!"
+        rr = requests.post(f"{API}/auth/register", json={"name": "L", "email": email, "password": pw}, timeout=10)
+        assert rr.status_code == 200
+        token = _re.search(r"[?&]token=([^&]+)", rr.json()["dev_verification_url"]).group(1)
+        assert requests.post(f"{API}/auth/verify-email", json={"token": token}, timeout=10).status_code == 200
+        assert s.post(f"{API}/auth/login", json={"email": email, "password": pw}, timeout=10).status_code == 200
         assert s.get(f"{API}/auth/me", timeout=10).status_code == 200
         r = s.post(f"{API}/auth/logout", timeout=10)
         assert r.status_code == 200

@@ -102,18 +102,18 @@ export default function Home() {
               <p className="text-xs text-[#7A9690] mt-0.5">Daily entry · {new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</p>
             </div>
           </div>
-          <div className="grid grid-cols-5 gap-3">
+          <div className="grid grid-cols-5 gap-2 sm:gap-3">
             {MOODS.map((m) => (
               <button
                 key={m.id}
                 onClick={() => setSelectedMood(m.id)}
                 data-testid={`mood-button-${m.id}`}
-                className={`group flex flex-col items-center gap-2 py-3 rounded-2xl border transition-all ${
+                className={`group flex flex-col items-center gap-1 sm:gap-2 py-2 sm:py-3 rounded-2xl border transition-all ${
                   selectedMood === m.id ? "border-[#2D5F5F] bg-[#E8F0EA] -translate-y-0.5" : "border-transparent hover:bg-[#F4F7F4]"
                 }`}
               >
-                <div className={`w-12 h-12 rounded-2xl grid place-items-center text-2xl ${m.bg}`}>{m.emoji}</div>
-                <div className="text-xs text-[#4A635D]">{m.label}</div>
+                <div className={`w-10 h-10 sm:w-12 sm:h-12 rounded-2xl grid place-items-center text-xl sm:text-2xl ${m.bg}`}>{m.emoji}</div>
+                <div className="text-[10px] sm:text-xs text-[#4A635D]">{m.label}</div>
               </button>
             ))}
           </div>
