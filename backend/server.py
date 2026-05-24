@@ -1122,7 +1122,16 @@ async def get_weekly_insight(user: dict = Depends(get_current_user)):
 
 @api.post("/insights/weekly")
 async def create_weekly_insight(user: dict = Depends(get_current_user)):
-    """Generate a fresh weekly insight using Claude and cache it."""
+    """Generate a fresh weekly insight using Claude and cache it. Throttled to 1/hour per user."""
+    # Soft throttle to prevent abuse of Claude calls (1 generation per hour)
+    one_hour_ago = (now_utc() - timedelta(hours=1)).isoformat()
+    recent = await db.weekly_insights.find_one(
+        {"user_id": user["user_id"], "created_at": {"$gte": one_hour_ago}}, {"_id": 0}
+    )
+    if recent:
+        stats, _, _ = await _build_insight_stats(user["user_id"])
+        return {"insight": recent, "stats": stats, "is_stale": False, "throttled": True}
+
     stats, moods, journals = await _build_insight_stats(user["user_id"])
     if not moods and not journals:
         raise HTTPException(
@@ -1133,7 +1142,7 @@ async def create_weekly_insight(user: dict = Depends(get_current_user)):
         content = await _generate_weekly_insight(user, moods, journals)
     except Exception as e:
         logger.exception("Insight generation failed")
-        raise HTTPException(status_code=500, detail=f"Gagal menghasilkan insight: {e}")
+        raise HTTPException(status_code=500, detail="Gagal menghasilkan insight. Coba lagi nanti.")
 
     insight_doc = {
         "insight_id": f"ins_{uuid.uuid4().hex[:12]}",

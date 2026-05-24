@@ -61,7 +61,11 @@ export default function Home() {
       setInsight(data.insight);
       setInsightStats(data.stats);
       setInsightStale(false);
-      toast.success("Weekly insight baru sudah siap 🌿");
+      if (data.throttled) {
+        toast.info("Insight sudah dibuat dalam 1 jam terakhir. Tampilkan yang ada.");
+      } else {
+        toast.success("Weekly insight baru sudah siap 🌿");
+      }
     } catch (err) {
       const msg = err.response?.data?.detail || "Gagal generate insight";
       toast.error(typeof msg === "string" ? msg : "Gagal generate insight");
