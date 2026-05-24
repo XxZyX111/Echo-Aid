@@ -441,6 +441,7 @@ async def on_startup():
         )
 
     await db.email_verification_tokens.create_index("token", unique=True)
+    await db.weekly_insights.create_index([("user_id", 1), ("created_at", -1)])
 
     # Seed doctors
     for d in DOCTORS_SEED:
@@ -1018,6 +1019,132 @@ async def ws_chat(websocket: WebSocket, booking_id: str):
             await websocket.close()
         except Exception:
             pass
+
+
+# ---------------------- Weekly AI Insights ----------------------
+_MOOD_SCORE = {"grateful": 5, "calm": 4, "neutral": 3, "low": 2, "anxious": 1}
+
+
+async def _generate_weekly_insight(user: dict, moods: list, journals: list) -> str:
+    name = user.get("nickname") or user.get("name") or "teman"
+    # Build a compact context for the LLM
+    mood_summary_lines = []
+    for m in moods[:14]:
+        ts = (m.get("created_at") or "")[:10]
+        note = (m.get("note") or "").strip()
+        line = f"- {ts}: {m.get('mood')}"
+        if note:
+            line += f' — "{note[:120]}"'
+        mood_summary_lines.append(line)
+    journal_summary_lines = []
+    for j in journals[:8]:
+        ts = (j.get("created_at") or "")[:10]
+        text = (j.get("content") or "").strip().replace("\n", " ")
+        if text:
+            journal_summary_lines.append(f"- {ts} ({j.get('mode')}): {text[:240]}")
+
+    mood_block = "\n".join(mood_summary_lines) or "Belum ada mood check-in minggu ini."
+    journal_block = "\n".join(journal_summary_lines) or "Belum ada entri jurnal minggu ini."
+
+    user_prompt = (
+        f"Klien: {name}\n\n"
+        f"Mood check-ins terakhir (paling baru di atas):\n{mood_block}\n\n"
+        f"Jurnal terbaru:\n{journal_block}\n\n"
+        "Buat **Weekly Insight** untuk klien dalam 3 bagian singkat:\n"
+        "1) Pola Mood: observasi 1-2 kalimat tentang pola emosional minggu ini.\n"
+        "2) Pertumbuhan: validasi & apresiasi 1 kalimat atas perubahan / konsistensi yang terlihat.\n"
+        "3) Saran Lembut: 1 langkah kecil berbasis bukti (CBT, grounding, breathing, journaling, behavioural activation) yang bisa dicoba minggu depan.\n\n"
+        "Gunakan campuran Bahasa Indonesia dan English secara natural, hangat, sapa klien dengan namanya minimal sekali. "
+        "Total maksimal 110 kata. Jangan mendiagnosis. Hindari emoji."
+    )
+
+    system_prompt = (
+        "Kamu adalah AI Wellness Companion EchoAid berbasis WHO LIVE LIFE. "
+        "Tugasmu memberikan refleksi mingguan yang lembut, validating, dan actionable untuk mahasiswa atau pekerja muda. "
+        "Selalu memvalidasi perasaan dulu, baru menawarkan langkah kecil yang spesifik. "
+        "Jangan pernah memberikan diagnosis klinis. Jika menemukan tanda krisis, sarankan menghubungi 119 ext 8 atau Guardian Circle."
+    )
+
+    chat = LlmChat(
+        api_key=EMERGENT_LLM_KEY,
+        session_id=f"insight_{user['user_id']}_{now_utc().strftime('%Y%m%d')}",
+        system_message=system_prompt,
+    ).with_model("anthropic", "claude-sonnet-4-5-20250929")
+
+    return await chat.send_message(UserMessage(text=user_prompt))
+
+
+async def _build_insight_stats(user_id: str):
+    """Aggregate last-7-day mood stats for the insight metadata."""
+    seven_days_ago = (now_utc() - timedelta(days=7)).isoformat()
+    moods = await db.mood_entries.find(
+        {"user_id": user_id, "created_at": {"$gte": seven_days_ago}}, {"_id": 0}
+    ).sort("created_at", -1).to_list(100)
+    journals = await db.journal_entries.find(
+        {"user_id": user_id, "created_at": {"$gte": seven_days_ago}}, {"_id": 0}
+    ).sort("created_at", -1).to_list(50)
+
+    counts: Dict[str, int] = {}
+    score_sum = 0
+    for m in moods:
+        counts[m["mood"]] = counts.get(m["mood"], 0) + 1
+        score_sum += _MOOD_SCORE.get(m["mood"], 3)
+    avg_score = (score_sum / len(moods)) if moods else None
+    dominant = max(counts, key=counts.get) if counts else None
+    return {
+        "mood_entries": len(moods),
+        "journal_entries": len(journals),
+        "mood_counts": counts,
+        "avg_mood_score": round(avg_score, 2) if avg_score is not None else None,
+        "dominant_mood": dominant,
+    }, moods, journals
+
+
+@api.get("/insights/weekly")
+async def get_weekly_insight(user: dict = Depends(get_current_user)):
+    """Return the most recent cached weekly insight (if any)."""
+    cached = await db.weekly_insights.find_one(
+        {"user_id": user["user_id"]}, {"_id": 0}, sort=[("created_at", -1)]
+    )
+    stats, _, _ = await _build_insight_stats(user["user_id"])
+    if not cached:
+        return {"insight": None, "stats": stats, "is_stale": True}
+    created_at = cached.get("created_at")
+    if isinstance(created_at, str):
+        created_at_dt = datetime.fromisoformat(created_at)
+    else:
+        created_at_dt = created_at
+    if created_at_dt.tzinfo is None:
+        created_at_dt = created_at_dt.replace(tzinfo=timezone.utc)
+    is_stale = (now_utc() - created_at_dt) > timedelta(hours=24)
+    return {"insight": cached, "stats": stats, "is_stale": is_stale}
+
+
+@api.post("/insights/weekly")
+async def create_weekly_insight(user: dict = Depends(get_current_user)):
+    """Generate a fresh weekly insight using Claude and cache it."""
+    stats, moods, journals = await _build_insight_stats(user["user_id"])
+    if not moods and not journals:
+        raise HTTPException(
+            status_code=400,
+            detail="Belum ada mood check-in atau jurnal minggu ini. Catat dulu mood kamu untuk mendapatkan insight.",
+        )
+    try:
+        content = await _generate_weekly_insight(user, moods, journals)
+    except Exception as e:
+        logger.exception("Insight generation failed")
+        raise HTTPException(status_code=500, detail=f"Gagal menghasilkan insight: {e}")
+
+    insight_doc = {
+        "insight_id": f"ins_{uuid.uuid4().hex[:12]}",
+        "user_id": user["user_id"],
+        "content": content,
+        "stats": stats,
+        "created_at": now_utc().isoformat(),
+    }
+    await db.weekly_insights.insert_one(insight_doc.copy())
+    insight_doc.pop("_id", None)
+    return {"insight": insight_doc, "stats": stats, "is_stale": False}
 
 
 # ---------------------- Profile & Settings ----------------------

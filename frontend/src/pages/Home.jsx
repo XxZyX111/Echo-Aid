@@ -2,7 +2,7 @@ import React, { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { api } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
-import { ArrowRight, Sparkles, MapPin, Stethoscope } from "lucide-react";
+import { ArrowRight, Sparkles, MapPin, Stethoscope, RefreshCw, Lightbulb } from "lucide-react";
 import {
   LineChart,
   Line,
@@ -37,11 +37,38 @@ export default function Home() {
   const [selectedMood, setSelectedMood] = useState(null);
   const [saving, setSaving] = useState(false);
 
+  // Weekly Insight
+  const [insight, setInsight] = useState(null);
+  const [insightStats, setInsightStats] = useState(null);
+  const [insightStale, setInsightStale] = useState(true);
+  const [insightLoading, setInsightLoading] = useState(false);
+
   const quote = useMemo(() => QUOTES[new Date().getDate() % QUOTES.length], []);
 
   useEffect(() => {
     api.get("/mood").then((r) => setMoods(r.data.items || [])).catch(() => {});
+    api.get("/insights/weekly").then((r) => {
+      setInsight(r.data.insight);
+      setInsightStats(r.data.stats);
+      setInsightStale(r.data.is_stale);
+    }).catch(() => {});
   }, []);
+
+  const generateInsight = async () => {
+    setInsightLoading(true);
+    try {
+      const { data } = await api.post("/insights/weekly");
+      setInsight(data.insight);
+      setInsightStats(data.stats);
+      setInsightStale(false);
+      toast.success("Weekly insight baru sudah siap 🌿");
+    } catch (err) {
+      const msg = err.response?.data?.detail || "Gagal generate insight";
+      toast.error(typeof msg === "string" ? msg : "Gagal generate insight");
+    } finally {
+      setInsightLoading(false);
+    }
+  };
 
   const submitMood = async () => {
     if (!selectedMood) {
@@ -205,6 +232,58 @@ export default function Home() {
             <Sparkles size={14} /> Try a 4-7-8 Breathing
           </button>
         </div>
+      </div>
+
+      {/* Weekly AI Insight */}
+      <div className="mt-5 bg-gradient-to-br from-[#E8F0EA] to-[#F4F7F4] rounded-3xl p-6 shadow-[0_8px_32px_rgba(45,95,95,0.06)] fade-up" data-testid="weekly-insight-card">
+        <div className="flex flex-wrap items-start justify-between gap-3 mb-4">
+          <div className="flex items-start gap-3">
+            <div className="w-11 h-11 rounded-2xl bg-[#2D5F5F] grid place-items-center text-white shrink-0">
+              <Lightbulb size={20} strokeWidth={1.6} />
+            </div>
+            <div>
+              <div className="text-[11px] uppercase tracking-[0.18em] text-[#4A635D]">Weekly Insight</div>
+              <h3 className="text-xl font-medium text-[#1C302B]" style={{ fontFamily: "Outfit, sans-serif" }}>
+                Refleksi 7 hari terakhir
+              </h3>
+              {insightStats && (
+                <div className="mt-1 text-xs text-[#7A9690] flex flex-wrap gap-x-3 gap-y-1" data-testid="insight-stats">
+                  <span>{insightStats.mood_entries} mood entries</span>
+                  <span>{insightStats.journal_entries} jurnal</span>
+                  {insightStats.dominant_mood && (
+                    <span>Dominan: <span className="text-[#2D5F5F] font-medium capitalize">{insightStats.dominant_mood}</span></span>
+                  )}
+                  {insightStats.avg_mood_score != null && (
+                    <span>Avg score: {insightStats.avg_mood_score}/5</span>
+                  )}
+                </div>
+              )}
+            </div>
+          </div>
+          <button
+            onClick={generateInsight}
+            disabled={insightLoading}
+            data-testid="generate-insight-button"
+            className="rounded-full bg-[#2D5F5F] text-white px-5 py-2 text-sm font-medium hover:bg-[#244C4C] hover:-translate-y-0.5 transition disabled:opacity-60 flex items-center gap-2"
+          >
+            <RefreshCw size={14} className={insightLoading ? "animate-spin" : ""} />
+            {insightLoading ? "Menganalisis…" : insight ? "Generate Ulang" : "Generate Insight"}
+          </button>
+        </div>
+
+        {insight ? (
+          <div className="bg-white rounded-2xl p-5 text-sm text-[#1C302B] leading-relaxed whitespace-pre-wrap" data-testid="insight-content">
+            {insight.content}
+            <div className="mt-3 pt-3 border-t border-[#E8F0EA] text-[11px] text-[#7A9690] flex items-center justify-between">
+              <span>Diperbarui {new Date(insight.created_at).toLocaleString("en-GB", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" })}</span>
+              {insightStale && <span className="text-[#C06C5B] font-medium">Sudah lebih dari 24 jam — refresh untuk insight terbaru</span>}
+            </div>
+          </div>
+        ) : (
+          <div className="bg-white rounded-2xl p-5 text-sm text-[#4A635D]" data-testid="insight-empty">
+            Belum ada insight minggu ini. Klik <span className="font-medium text-[#1C302B]">Generate Insight</span> untuk refleksi mingguan dari AI berbasis pola mood & jurnal kamu. Powered by Claude Sonnet 4.5 + WHO LIVE LIFE framework.
+          </div>
+        )}
       </div>
     </div>
   );
