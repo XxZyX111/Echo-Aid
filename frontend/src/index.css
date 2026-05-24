@@ -1,0 +1,133 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@import url('https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&family=Manrope:wght@300;400;500;600;700&display=swap');
+
+:root {
+    --sage-bg: #F4F7F4;
+    --sage-card: #FFFFFF;
+    --sage-primary: #2D5F5F;
+    --sage-primary-hover: #244C4C;
+    --sage-secondary: #E8F0EA;
+    --sage-secondary-hover: #D8E6DD;
+    --sage-accent: #C06C5B;
+    --sage-text: #1C302B;
+    --sage-text-muted: #4A635D;
+    --sage-text-soft: #7A9690;
+    --sage-border: #D8E6DD;
+}
+
+html, body, #root {
+    height: 100%;
+}
+
+body {
+    margin: 0;
+    font-family: 'Manrope', system-ui, sans-serif;
+    background: var(--sage-bg);
+    color: var(--sage-text);
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+}
+
+h1, h2, h3, h4, h5 {
+    font-family: 'Outfit', system-ui, sans-serif;
+    letter-spacing: -0.01em;
+}
+
+/* Shadcn neutral tokens kept */
+@layer base {
+    :root {
+        --background: 120 14% 96%;
+        --foreground: 162 27% 14%;
+        --card: 0 0% 100%;
+        --card-foreground: 162 27% 14%;
+        --popover: 0 0% 100%;
+        --popover-foreground: 162 27% 14%;
+        --primary: 180 36% 28%;
+        --primary-foreground: 0 0% 100%;
+        --secondary: 138 24% 92%;
+        --secondary-foreground: 162 27% 14%;
+        --muted: 138 24% 92%;
+        --muted-foreground: 162 14% 38%;
+        --accent: 138 24% 92%;
+        --accent-foreground: 162 27% 14%;
+        --destructive: 0 75% 50%;
+        --destructive-foreground: 0 0% 100%;
+        --border: 138 24% 88%;
+        --input: 138 24% 88%;
+        --ring: 180 36% 28%;
+        --radius: 1rem;
+    }
+}
+
+@layer base {
+    * {
+        @apply border-border;
+    }
+}
+
+/* Botanical sage gradient for auth */
+.botanical-bg {
+    background:
+        radial-gradient(circle at 20% 20%, rgba(255, 255, 255, 0.18), transparent 40%),
+        radial-gradient(circle at 80% 80%, rgba(255, 255, 255, 0.12), transparent 50%),
+        linear-gradient(135deg, #93C5A8 0%, #5B9684 50%, #2D5F5F 100%);
+    position: relative;
+    overflow: hidden;
+}
+
+.botanical-bg::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 800 800'><g stroke='%23FFFFFF' stroke-opacity='0.35' stroke-width='1.4' fill='none' stroke-linecap='round'><path d='M-20 80 C 200 30 380 120 820 30'/><path d='M-20 180 C 220 130 440 220 820 130'/><path d='M-20 320 C 240 280 460 360 820 270'/><path d='M-20 460 C 200 420 480 500 820 410'/><path d='M-20 600 C 240 560 460 640 820 550'/><path d='M-20 740 C 220 700 460 780 820 690'/></g></svg>");
+    background-size: cover;
+    opacity: 0.8;
+    pointer-events: none;
+}
+
+/* Waveform animation for voice */
+.waveform-bar {
+    display: inline-block;
+    width: 5px;
+    margin: 0 2px;
+    background: linear-gradient(180deg, #5B9684, #2D5F5F);
+    border-radius: 999px;
+    animation: wave 1.2s ease-in-out infinite;
+}
+@keyframes wave {
+    0%, 100% { height: 14px; }
+    50% { height: 56px; }
+}
+.waveform-bar:nth-child(2) { animation-delay: 0.1s; }
+.waveform-bar:nth-child(3) { animation-delay: 0.2s; }
+.waveform-bar:nth-child(4) { animation-delay: 0.3s; }
+.waveform-bar:nth-child(5) { animation-delay: 0.4s; }
+.waveform-bar:nth-child(6) { animation-delay: 0.5s; }
+.waveform-bar:nth-child(7) { animation-delay: 0.6s; }
+.waveform-bar:nth-child(8) { animation-delay: 0.7s; }
+.waveform-bar:nth-child(9) { animation-delay: 0.5s; }
+.waveform-bar:nth-child(10) { animation-delay: 0.3s; }
+.waveform-bar:nth-child(11) { animation-delay: 0.15s; }
+
+/* Soft fade-in */
+@keyframes fadeUp {
+    from { opacity: 0; transform: translateY(8px); }
+    to { opacity: 1; transform: translateY(0); }
+}
+.fade-up { animation: fadeUp 0.5s ease-out both; }
+
+/* Scroll bars subtle */
+::-webkit-scrollbar { width: 8px; height: 8px; }
+::-webkit-scrollbar-thumb { background: rgba(45, 95, 95, 0.18); border-radius: 999px; }
+::-webkit-scrollbar-track { background: transparent; }
+
+/* Leaflet container fix */
+.leaflet-container {
+    width: 100%;
+    height: 100%;
+    background: #eaf3ec;
+    font-family: 'Manrope', sans-serif;
+}
