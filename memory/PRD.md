@@ -1,42 +1,48 @@
 # EchoAid — Product Requirements Document
 
 ## Problem Statement
-EchoAid adalah platform kesehatan mental digital berbasis User-Centered Design untuk mahasiswa (18-24) dan pekerja muda di Indonesia. Fitur inti: sign up/in dengan akun nyata, mood check-in dengan tracking, journal & voice-to-text (Whisper), Healing Map (Leaflet), Meditation, Consultation (booking dokter), EchoChat (AI doctor — Claude Sonnet 4.5 — hanya setelah booking), Profile, Settings, Support/SOS.
+EchoAid adalah platform kesehatan mental digital berbasis User-Centered Design untuk mahasiswa (18-24) dan pekerja muda di Indonesia.
 
 ## Architecture
 - **Frontend**: React (CRA + craco) + Tailwind + Shadcn UI + Recharts + react-leaflet + lucide-react.
-- **Backend**: FastAPI + Motor (MongoDB) + bcrypt + PyJWT + emergentintegrations.
-- **Auth**: JWT email/password (httpOnly cookie) + Emergent Google OAuth (session_token cookie).
-- **LLMs (Emergent LLM Key)**: OpenAI Whisper (`whisper-1`) for voice journal STT; Claude Sonnet 4.5 (`claude-sonnet-4-5-20250929`) for EchoChat.
-- **Map**: Leaflet + OpenStreetMap (no API key required, free).
-- **Color/Typography**: Sage green sanctuary palette (#2D5F5F primary, #E8F0EA secondary, #C06C5B accent). Outfit (headings) + Manrope (body).
+- **Backend**: FastAPI + Motor (MongoDB) + bcrypt + PyJWT + emergentintegrations + resend.
+- **Auth**: JWT email/password (httpOnly cookie, email verification required) + Emergent Google OAuth (auto-verified).
+- **LLMs (Emergent LLM Key)**: OpenAI Whisper for voice journal STT; Claude Sonnet 4.5 for EchoChat (streaming via WebSocket).
+- **Email**: Resend (testing mode — sends only to verified address; dev_verification_url surfaced in API for demo flow).
+- **Map**: Leaflet + OpenStreetMap; geolocation via browser API + haversine sort.
+- **Realtime**: FastAPI WebSocket at `/api/ws/chat/{booking_id}` with simulated streaming.
+
+## Implemented (Iteration 1 — 2026-02-24)
+- Login/Register pages (email-password + Google OAuth).
+- Sidebar dashboard layout.
+- Home: mood check-in, daily quote, health correlation chart, healing map preview.
+- Journal & MoodTracker: text + voice (Whisper) modes.
+- Healing Map: parks list + Leaflet+OSM.
+- Meditation: featured 4-7-8 + animated breathing player + library.
+- Consultation: doctors list + filter + week-view calendar booking.
+- EchoChat: Claude Sonnet 4.5 AI doctor — booking-gated.
+- Profile: sanctuary preferences, daily routine, privacy, guardian circle.
+- Settings: notifications, accessibility, account.
+- Support/SOS page.
+- 27/27 backend tests passed.
+
+## Implemented (Iteration 2 — 2026-02-24)
+- [x] **Email verification flow** via Resend (testing-mode aware with `dev_verification_url` in response for demo).
+- [x] **Geolocation-aware Healing Map**: browser geolocation + haversine sort, real-time distance labels.
+- [x] **Real-time WebSocket chat** at `/api/ws/chat/{booking_id}` with streaming AI response (token-by-token simulated, live/connecting/offline indicator).
+- [x] **Mobile polish**: tighter mood grid on mobile, EchoChat mobile booking selector, sidebar hidden < md, bottom mobile nav.
+- [x] **Leaflet/OSM** kept (Google Maps API key deferred until user obtains one).
+- 43/43 backend tests passed (16 new + 27 regression).
 
 ## User Personas
-- **Mahasiswa 18-24** mengalami burnout akademis, kecemasan ujian, isolasi sosial.
-- **Pekerja muda** terpapar stres pekerjaan, work-life balance, hubungan profesional.
+- Mahasiswa 18-24 mengalami burnout akademis, kecemasan ujian, isolasi sosial.
+- Pekerja muda terpapar stres pekerjaan, work-life balance.
 
-## Core Requirements (Done in 1st iteration)
-- [x] Login/Register pages (email-password + Google).
-- [x] Sidebar dashboard layout.
-- [x] Home: greeting, daily quote, 5-emoji mood check-in, consultation CTA, health correlation chart, healing map preview.
-- [x] Journal & MoodTracker: voice mode (Whisper transcription) + text mode, weekly growth panel, emotional landscape calendar, recent echoes.
-- [x] Healing Map: nearby parks list + Leaflet map (Taman Menteng, Taman Suropati, Lapangan Banteng).
-- [x] Meditation: featured 4-7-8 breathing guide with animated breathing player, library of guided exercises.
-- [x] Consultation: doctors list (3 seeded), category filter, search, calendar week view + time slot booking.
-- [x] EchoChat: AI doctor (Claude Sonnet 4.5) chat — only active after booking; multi-booking sidebar.
-- [x] Profile: sanctuary preferences, daily support routine, privacy & security toggles, guardian circle CRUD, sign out.
-- [x] Settings: notifications, accessibility, account management toggles.
-- [x] Support/SOS page with emergency contacts.
-
-## Implementation Date
-- 2026-02-24 (Feb 2026): MVP completed and tested.
-
-## Prioritized Backlog (Post-MVP)
-- **P0**: Email verification flow for sign-up confirmation.
-- **P0**: Mobile responsiveness polish (currently functional, can be refined for portrait phones).
-- **P1**: Real-time chat with WebSocket fallback (currently polling-free request/response).
-- **P1**: Mood prediction & AI insights from journal entries.
-- **P1**: Geolocation API to detect user location & sort healing map by distance.
-- **P2**: PWA support + offline first journal.
+## Prioritized Backlog (Post-Iter 2)
+- **P0**: Verify Resend domain + change SENDER_EMAIL to noreply@echoaid.com (currently restricted to aelkurniawan13@gmail.com).
+- **P1**: Mood AI insights from journal entries (Claude analyses).
+- **P1**: Upgrade Healing Map to Google Maps (needs Maps JavaScript API key).
+- **P1**: Shareable Wellness Streak feature (anonymized badge sharing).
+- **P2**: PWA + offline first journal.
 - **P2**: Push notifications for daily reminders.
 - **P2**: Community peer-support groups.
