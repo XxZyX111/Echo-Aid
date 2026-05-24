@@ -1,7 +1,84 @@
 import React, { useEffect, useRef, useState } from "react";
 import { api } from "@/lib/api";
-import { Mic, Square, Sparkles } from "lucide-react";
+import { Mic, Square, Sparkles, HeartHandshake, Loader2 } from "lucide-react";
 import { toast } from "sonner";
+
+const MOOD_EMOJI = {
+  grateful: "😊",
+  calm: "😌",
+  neutral: "😐",
+  low: "😔",
+  anxious: "😟",
+};
+const MOOD_LABEL_BG = {
+  grateful: "bg-[#E6F4EA] text-[#2D5F5F]",
+  calm: "bg-[#E8F0F7] text-[#2D5F5F]",
+  neutral: "bg-[#FBEFD8] text-[#7A6020]",
+  low: "bg-[#F4DDE4] text-[#9C3A53]",
+  anxious: "bg-[#E6E0F2] text-[#5E4791]",
+};
+
+function EntryItem({ entry, onUpdate }) {
+  const [generating, setGenerating] = useState(false);
+  const isMood = entry.mode === "mood" || entry.source === "mood_checkin";
+  const badge = isMood ? "Mood" : entry.mode === "voice" ? "Voice" : "Text";
+  const moodEmoji = entry.mood ? MOOD_EMOJI[entry.mood] : null;
+  const moodChipClass = entry.mood ? MOOD_LABEL_BG[entry.mood] || "" : "";
+
+  const handleAi = async () => {
+    setGenerating(true);
+    try {
+      const { data } = await api.post(`/journal/${entry.entry_id}/ai-response`);
+      onUpdate?.(data);
+      toast.success("Respons supportif sudah siap 🌿");
+    } catch (e) {
+      toast.error("Gagal generate respons");
+    } finally {
+      setGenerating(false);
+    }
+  };
+
+  return (
+    <div className="p-3 rounded-2xl hover:bg-[#F4F7F4] transition" data-testid={`entry-${entry.entry_id}`}>
+      <div className="flex items-start gap-3">
+        <div className="flex flex-col items-center gap-1.5">
+          <div className={`text-[11px] uppercase tracking-[0.16em] px-2 py-1 rounded-full bg-[#E6F4EA] text-[#2D5F5F]`}>
+            {badge}
+          </div>
+          {moodEmoji && (
+            <div className={`text-base rounded-full w-8 h-8 grid place-items-center ${moodChipClass}`} title={entry.mood}>
+              {moodEmoji}
+            </div>
+          )}
+        </div>
+        <div className="flex-1 min-w-0">
+          <div className="text-sm text-[#1C302B] whitespace-pre-wrap">{entry.content}</div>
+          <div className="text-[11px] text-[#7A9690] mt-1">{new Date(entry.created_at).toLocaleString()}</div>
+          {entry.ai_response ? (
+            <div className="mt-3 bg-[#E8F0EA] border-l-4 border-[#2D5F5F] rounded-xl p-3 fade-up" data-testid={`ai-response-${entry.entry_id}`}>
+              <div className="text-[10px] uppercase tracking-[0.18em] text-[#2D5F5F] font-semibold flex items-center gap-1.5">
+                <HeartHandshake size={12} /> Echo Companion
+              </div>
+              <p className="text-sm text-[#1C302B] mt-1.5 leading-relaxed whitespace-pre-wrap">{entry.ai_response}</p>
+            </div>
+          ) : (
+            (entry.content && entry.content.length > 12) && (
+              <button
+                onClick={handleAi}
+                disabled={generating}
+                data-testid={`ai-respond-btn-${entry.entry_id}`}
+                className="mt-2 inline-flex items-center gap-1.5 text-[11px] text-[#2D5F5F] hover:underline disabled:opacity-60"
+              >
+                {generating ? <Loader2 size={12} className="animate-spin" /> : <HeartHandshake size={12} />}
+                {generating ? "Menulis respons…" : "Minta respons supportif AI"}
+              </button>
+            )
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
 
 function Waveform({ active }) {
   return (
@@ -215,13 +292,7 @@ export default function JournalPage() {
           <div className="space-y-3">
             {entries.length === 0 && <div className="text-sm text-[#7A9690]">Belum ada entri. Mulai dengan suara atau teks di atas.</div>}
             {entries.slice(0, 5).map((e) => (
-              <div key={e.entry_id} className="flex items-start gap-3 p-3 rounded-2xl hover:bg-[#F4F7F4] transition">
-                <div className="text-[11px] uppercase tracking-[0.16em] bg-[#E6F4EA] text-[#2D5F5F] px-2 py-1 rounded-full">{e.mode === "voice" ? "Voice" : "Text"}</div>
-                <div className="flex-1 min-w-0">
-                  <div className="text-sm text-[#1C302B] line-clamp-2">{e.content}</div>
-                  <div className="text-[11px] text-[#7A9690] mt-1">{new Date(e.created_at).toLocaleString()}</div>
-                </div>
-              </div>
+              <EntryItem key={e.entry_id} entry={e} onUpdate={(u) => setEntries((all) => all.map((x) => x.entry_id === u.entry_id ? u : x))} />
             ))}
           </div>
         </div>

@@ -442,6 +442,7 @@ async def on_startup():
 
     await db.email_verification_tokens.create_index("token", unique=True)
     await db.weekly_insights.create_index([("user_id", 1), ("created_at", -1)])
+    await db.park_bookmarks.create_index([("user_id", 1), ("place_id", 1)], unique=True)
 
     # Seed doctors
     for d in DOCTORS_SEED:
@@ -682,19 +683,107 @@ async def me(user: dict = Depends(get_current_user)):
     return {"user": user}
 
 
+# ---------------------- Distress detection & supportive AI response ----------------------
+_DISTRESS_MOODS = {"low", "anxious"}
+_DISTRESS_KEYWORDS = [
+    "sedih", "stres", "stress", "cemas", "anxious", "anxiety", "panik", "panic",
+    "lelah", "burnout", "putus asa", "hopeless", "menyerah", "give up",
+    "kesepian", "lonely", "alone", "menangis", "nangis", "cry",
+    "marah", "angry", "frustrasi", "frustrated", "overwhelm", "overwhelmed",
+    "takut", "afraid", "scared", "khawatir", "worried",
+    "depresi", "depres", "depressed", "putus", "broke up", "berantem",
+    "gagal", "fail", "failed", "ditolak", "rejected",
+    "ga bisa tidur", "insomnia", "ga selera", "no appetite",
+    "pengen menyerah", "ingin mengakhiri", "self-harm", "hurt myself", "bunuh diri", "suicide",
+    "pusheng", "pusing",  # casual indonesian for stressed
+]
+
+
+def detect_distress(content: str, mood: Optional[str] = None) -> bool:
+    if mood and mood in _DISTRESS_MOODS:
+        return True
+    if not content:
+        return False
+    low = content.lower()
+    return any(kw in low for kw in _DISTRESS_KEYWORDS)
+
+
+async def generate_supportive_response(content: str, mood: Optional[str], user_name: str) -> str:
+    """Use Claude Sonnet 4.5 to produce a short empathetic supportive response."""
+    mood_label = f"(mood: {mood})" if mood else ""
+    user_prompt = (
+        f"Klien {user_name} menulis di journal mereka {mood_label}:\n"
+        f'"""\n{content}\n"""\n\n'
+        "Berikan 1 paragraf singkat (max 60 kata, 2-3 kalimat): "
+        "validasi perasaan mereka, 1 langkah kecil berbasis bukti (grounding 5-4-3-2-1, "
+        "4-7-8 breathing, journaling lanjutan, atau menghubungi seseorang yang dipercaya). "
+        "Gaya hangat, campuran Bahasa Indonesia + English, sapa dengan nama klien. "
+        "Hindari diagnosis. Jika ada tanda krisis berat, sarankan hubungi 119 ext 8 atau Guardian Circle."
+    )
+    system_prompt = (
+        "Kamu adalah EchoAid Wellness Companion - AI pendukung kesehatan mental berbasis WHO LIVE LIFE. "
+        "Tugasmu adalah memberikan respons singkat, empatik, dan actionable untuk mahasiswa atau pekerja muda."
+    )
+    chat = LlmChat(
+        api_key=EMERGENT_LLM_KEY,
+        session_id=f"support_{uuid.uuid4().hex[:8]}",
+        system_message=system_prompt,
+    ).with_model("anthropic", "claude-sonnet-4-5-20250929")
+    return await chat.send_message(UserMessage(text=user_prompt))
+
+
+async def maybe_attach_ai_response(entry_doc: dict, user: dict) -> dict:
+    """If the entry shows distress, attach an ai_response. Best-effort, swallows errors."""
+    if not detect_distress(entry_doc.get("content", ""), entry_doc.get("mood")):
+        return entry_doc
+    try:
+        name = user.get("nickname") or user.get("name") or "teman"
+        response = await generate_supportive_response(entry_doc.get("content", ""), entry_doc.get("mood"), name)
+        entry_doc["ai_response"] = response
+        entry_doc["ai_response_at"] = now_utc().isoformat()
+    except Exception as e:
+        logger.exception(f"AI supportive response failed: {e}")
+    return entry_doc
+
+
 # ---------------------- Mood ----------------------
 @api.post("/mood")
 async def create_mood(body: MoodIn, user: dict = Depends(get_current_user)):
+    note = (body.note or "").strip()
     entry = {
         "entry_id": f"mood_{uuid.uuid4().hex[:12]}",
         "user_id": user["user_id"],
         "mood": body.mood,
-        "note": body.note or "",
+        "note": note,
         "created_at": now_utc().isoformat(),
     }
     await db.mood_entries.insert_one(entry.copy())
     entry.pop("_id", None)
-    return entry
+
+    journal_doc = None
+    # When user provides a note with their mood, mirror it into the journal feed
+    if note:
+        journal_doc = {
+            "entry_id": f"jrn_{uuid.uuid4().hex[:12]}",
+            "user_id": user["user_id"],
+            "mode": "mood",
+            "content": note,
+            "mood": body.mood,
+            "source": "mood_checkin",
+            "linked_mood_id": entry["entry_id"],
+            "created_at": now_utc().isoformat(),
+        }
+        journal_doc = await maybe_attach_ai_response(journal_doc, user)
+        await db.journal_entries.insert_one(journal_doc.copy())
+        journal_doc.pop("_id", None)
+        # Backlink for retrieval
+        await db.mood_entries.update_one(
+            {"entry_id": entry["entry_id"]},
+            {"$set": {"linked_journal_id": journal_doc["entry_id"]}},
+        )
+        entry["linked_journal_id"] = journal_doc["entry_id"]
+
+    return {"entry": entry, "journal_entry": journal_doc}
 
 
 @api.get("/mood")
@@ -713,8 +802,10 @@ async def create_journal(body: JournalIn, user: dict = Depends(get_current_user)
         "mode": body.mode,
         "content": body.content,
         "mood": body.mood,
+        "source": "journal",
         "created_at": now_utc().isoformat(),
     }
+    entry = await maybe_attach_ai_response(entry, user)
     await db.journal_entries.insert_one(entry.copy())
     entry.pop("_id", None)
     return entry
@@ -725,6 +816,25 @@ async def list_journal(user: dict = Depends(get_current_user)):
     cursor = db.journal_entries.find({"user_id": user["user_id"]}, {"_id": 0}).sort("created_at", -1).limit(50)
     items = await cursor.to_list(50)
     return {"items": items}
+
+
+@api.post("/journal/{entry_id}/ai-response")
+async def regenerate_ai_response(entry_id: str, user: dict = Depends(get_current_user)):
+    entry = await db.journal_entries.find_one({"entry_id": entry_id, "user_id": user["user_id"]}, {"_id": 0})
+    if not entry:
+        raise HTTPException(status_code=404, detail="Entry not found")
+    try:
+        name = user.get("nickname") or user.get("name") or "teman"
+        response = await generate_supportive_response(entry.get("content", ""), entry.get("mood"), name)
+    except Exception as e:
+        logger.exception("Manual AI response failed")
+        raise HTTPException(status_code=500, detail="Gagal menghasilkan respons. Coba lagi nanti.")
+    await db.journal_entries.update_one(
+        {"entry_id": entry_id, "user_id": user["user_id"]},
+        {"$set": {"ai_response": response, "ai_response_at": now_utc().isoformat()}},
+    )
+    fresh = await db.journal_entries.find_one({"entry_id": entry_id, "user_id": user["user_id"]}, {"_id": 0})
+    return fresh
 
 
 @api.post("/journal/transcribe")
@@ -752,8 +862,18 @@ async def transcribe_journal(
 
 # ---------------------- Healing Map ----------------------
 @api.get("/healing/parks")
-async def list_parks(mood: Optional[str] = None, lat: Optional[float] = None, lng: Optional[float] = None):
-    cursor = db.parks.find({}, {"_id": 0})
+async def list_parks(
+    request: Request,
+    mood: Optional[str] = None,
+    lat: Optional[float] = None,
+    lng: Optional[float] = None,
+    q: Optional[str] = None,
+):
+    query: Dict = {}
+    if q and q.strip():
+        regex = {"$regex": q.strip(), "$options": "i"}
+        query["$or"] = [{"name": regex}, {"subtitle": regex}, {"tags": regex}]
+    cursor = db.parks.find(query, {"_id": 0})
     items = await cursor.to_list(50)
     # If user shared geolocation, compute distances + sort
     if lat is not None and lng is not None:
@@ -762,7 +882,44 @@ async def list_parks(mood: Optional[str] = None, lat: Optional[float] = None, ln
             it["distance_km"] = round(d, 2)
             it["distance"] = f"{int(d * 1000)}m away" if d < 1 else f"{d:.1f}km away"
         items.sort(key=lambda x: x.get("distance_km", 9999))
+
+    # Attach bookmarks for the authenticated user (best-effort, optional auth)
+    token = request.cookies.get("access_token") or request.cookies.get("session_token")
+    user = await get_user_by_token(token) if token else None
+    if user:
+        bookmarked = await db.park_bookmarks.find(
+            {"user_id": user["user_id"]}, {"_id": 0, "place_id": 1}
+        ).to_list(100)
+        bookmark_ids = {b["place_id"] for b in bookmarked}
+        for it in items:
+            it["bookmarked"] = it["place_id"] in bookmark_ids
     return {"items": items, "mood_hint": mood or "anxious", "user_lat": lat, "user_lng": lng}
+
+
+@api.post("/healing/parks/{place_id}/bookmark")
+async def toggle_park_bookmark(place_id: str, user: dict = Depends(get_current_user)):
+    park = await db.parks.find_one({"place_id": place_id}, {"_id": 0})
+    if not park:
+        raise HTTPException(status_code=404, detail="Park not found")
+    existing = await db.park_bookmarks.find_one({"user_id": user["user_id"], "place_id": place_id})
+    if existing:
+        await db.park_bookmarks.delete_one({"user_id": user["user_id"], "place_id": place_id})
+        return {"bookmarked": False, "place_id": place_id}
+    await db.park_bookmarks.insert_one({
+        "user_id": user["user_id"],
+        "place_id": place_id,
+        "park_name": park.get("name"),
+        "created_at": now_utc().isoformat(),
+    })
+    return {"bookmarked": True, "place_id": place_id}
+
+
+@api.get("/healing/bookmarks")
+async def list_bookmarks(user: dict = Depends(get_current_user)):
+    bookmarks = await db.park_bookmarks.find(
+        {"user_id": user["user_id"]}, {"_id": 0}
+    ).sort("created_at", -1).to_list(50)
+    return {"items": bookmarks}
 
 
 # ---------------------- Meditation ----------------------

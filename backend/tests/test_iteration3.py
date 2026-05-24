@@ -163,26 +163,34 @@ class TestWeeklyInsightsFlow:
         assert body["stats"]["mood_entries"] == 5
 
     def test_05_post_second_time_persists_new_doc(self, user_a):
+        # Iter4 update: server now throttles POST /api/insights/weekly within 24h
+        # and returns the existing cached doc (with throttled=true). Validate that
+        # the existing doc is returned and no new Claude call is performed.
         first_id = getattr(user_a, "_first_insight_id")
         first_created_at = getattr(user_a, "_first_created_at")
 
-        # Small sleep so created_at differs noticeably
         time.sleep(1.2)
         t0 = time.time()
         r = user_a.post(f"{API}/insights/weekly", timeout=120)
-        print(f"[2nd insight gen took {time.time()-t0:.1f}s]")
+        elapsed = time.time() - t0
+        print(f"[2nd insight gen took {elapsed:.1f}s]")
         assert r.status_code == 200, r.text
-        new_insight = r.json()["insight"]
-        assert new_insight["insight_id"] != first_id, "expected a NEW insight_id on second POST"
-        assert new_insight["created_at"] > first_created_at, (
-            f"new created_at ({new_insight['created_at']}) should be > first ({first_created_at})"
+        body = r.json()
+        returned_insight = body["insight"]
+        assert returned_insight["insight_id"] == first_id, (
+            "expected throttled cached insight on second POST within 24h"
         )
+        assert returned_insight["created_at"] == first_created_at
+        # Throttled response should be fast (< 2s, no Claude call)
+        assert elapsed < 3.0, f"throttled call should be fast, took {elapsed:.1f}s"
+        # Optional throttled flag
+        if "throttled" in body:
+            assert body["throttled"] is True
 
-        # GET should now return the *most recent* one (the new one)
+        # GET should still return that same doc
         gr = user_a.get(f"{API}/insights/weekly", timeout=20)
         assert gr.status_code == 200
-        latest = gr.json()["insight"]
-        assert latest["insight_id"] == new_insight["insight_id"]
+        assert gr.json()["insight"]["insight_id"] == first_id
 
 
 class TestWeeklyInsightsIsolation:

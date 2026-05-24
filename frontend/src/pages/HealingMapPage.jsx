@@ -1,8 +1,8 @@
-import React, { useEffect, useState } from "react";
-import { MapContainer, TileLayer, Marker, Popup, CircleMarker } from "react-leaflet";
+import React, { useEffect, useRef, useState } from "react";
+import { MapContainer, TileLayer, Marker, Popup, CircleMarker, useMap } from "react-leaflet";
 import L from "leaflet";
 import { api } from "@/lib/api";
-import { MapPin, LocateFixed, Loader2 } from "lucide-react";
+import { MapPin, LocateFixed, Loader2, Search, Heart } from "lucide-react";
 import { toast } from "sonner";
 
 // Fix Leaflet icons
@@ -13,19 +13,39 @@ L.Icon.Default.mergeOptions({
   shadowUrl: "https://unpkg.com/leaflet@1.9.4/dist/images/marker-shadow.png",
 });
 
+function MapFlyTo({ target }) {
+  const map = useMap();
+  useEffect(() => {
+    if (target) {
+      map.flyTo([target.lat, target.lng], 16, { duration: 1.2 });
+    }
+  }, [target, map]);
+  return null;
+}
+
 export default function HealingMapPage() {
   const [parks, setParks] = useState([]);
   const [userPos, setUserPos] = useState(null);
   const [locating, setLocating] = useState(false);
   const [locError, setLocError] = useState("");
+  const [search, setSearch] = useState("");
+  const [flyTarget, setFlyTarget] = useState(null);
+  const markerRefs = useRef({});
 
-  const load = async (pos) => {
-    const params = pos ? { lat: pos.lat, lng: pos.lng } : {};
+  const load = async (pos, q) => {
+    const params = {};
+    if (pos) { params.lat = pos.lat; params.lng = pos.lng; }
+    if (q && q.trim()) params.q = q.trim();
     const r = await api.get("/healing/parks", { params });
     setParks(r.data.items || []);
   };
 
-  useEffect(() => { load(null); }, []);
+  useEffect(() => { load(userPos, ""); /* eslint-disable-next-line */ }, []);
+
+  const onSearch = (e) => {
+    e.preventDefault();
+    load(userPos, search);
+  };
 
   const detectLocation = () => {
     if (!navigator.geolocation) {
@@ -38,7 +58,7 @@ export default function HealingMapPage() {
       async (p) => {
         const pos = { lat: p.coords.latitude, lng: p.coords.longitude };
         setUserPos(pos);
-        await load(pos);
+        await load(pos, search);
         setLocating(false);
         toast.success("Lokasi terdeteksi. Sanctuary terdekat ditampilkan.");
       },
@@ -54,7 +74,27 @@ export default function HealingMapPage() {
     );
   };
 
-  const center = userPos
+  const focusPark = (p) => {
+    setFlyTarget({ lat: p.lat, lng: p.lng, _ts: Date.now() });
+    // open popup after a brief delay
+    setTimeout(() => {
+      const ref = markerRefs.current[p.place_id];
+      if (ref?.openPopup) ref.openPopup();
+    }, 1300);
+  };
+
+  const toggleBookmark = async (p, ev) => {
+    ev?.stopPropagation?.();
+    try {
+      const { data } = await api.post(`/healing/parks/${p.place_id}/bookmark`);
+      setParks((all) => all.map((x) => x.place_id === p.place_id ? { ...x, bookmarked: data.bookmarked } : x));
+      toast.success(data.bookmarked ? `${p.name} ditandai ❤️` : `Bookmark dihapus dari ${p.name}`);
+    } catch (e) {
+      toast.error("Gagal menyimpan bookmark");
+    }
+  };
+
+  const initialCenter = userPos
     ? [userPos.lat, userPos.lng]
     : parks.length ? [parks[0].lat, parks[0].lng] : [-6.2, 106.83];
 
@@ -81,6 +121,32 @@ export default function HealingMapPage() {
         </div>
       </div>
 
+      {/* Search bar */}
+      <form onSubmit={onSearch} className="mb-4 flex items-center gap-2" data-testid="park-search-form">
+        <div className="flex-1 flex items-center gap-3 px-4 py-3 rounded-2xl bg-white shadow-[0_8px_24px_rgba(45,95,95,0.05)] border border-[#D8E6DD] focus-within:border-[#2D5F5F] transition">
+          <Search size={16} className="text-[#7A9690]" />
+          <input
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="Cari sanctuary… (mis. Menteng, Garden, Nature)"
+            className="flex-1 bg-transparent outline-none text-sm"
+            data-testid="park-search-input"
+          />
+          {search && (
+            <button type="button" onClick={() => { setSearch(""); load(userPos, ""); }} className="text-xs text-[#7A9690] hover:text-[#1C302B]" data-testid="park-search-clear">
+              Clear
+            </button>
+          )}
+        </div>
+        <button
+          type="submit"
+          data-testid="park-search-submit"
+          className="rounded-2xl bg-[#2D5F5F] text-white px-5 py-3 text-sm font-medium hover:bg-[#244C4C] transition"
+        >
+          Search
+        </button>
+      </form>
+
       {locError && (
         <div className="mb-3 text-sm text-[#C06C5B] bg-[#FCEFEB] px-4 py-2 rounded-xl">{locError}</div>
       )}
@@ -98,14 +164,38 @@ export default function HealingMapPage() {
           </div>
 
           <div className="space-y-3">
-            <div className="text-[11px] uppercase tracking-[0.18em] text-[#7A9690]">Nearby Sanctuaries</div>
+            <div className="text-[11px] uppercase tracking-[0.18em] text-[#7A9690]">
+              {search ? `Hasil untuk "${search}" (${parks.length})` : "Nearby Sanctuaries"}
+            </div>
+            {parks.length === 0 && (
+              <div className="bg-white rounded-3xl p-5 text-sm text-[#7A9690] text-center shadow-[0_8px_32px_rgba(45,95,95,0.06)]">
+                Tidak ada sanctuary yang cocok. Coba kata kunci lain.
+              </div>
+            )}
             {parks.map((p) => (
-              <div key={p.place_id} className="bg-white rounded-3xl p-5 shadow-[0_8px_32px_rgba(45,95,95,0.06)] flex gap-4 fade-up" data-testid={`park-card-${p.place_id}`}>
-                <img src={p.image} alt={p.name} className="w-20 h-20 rounded-2xl object-cover" />
+              <button
+                key={p.place_id}
+                onClick={() => focusPark(p)}
+                data-testid={`park-card-${p.place_id}`}
+                className="w-full text-left bg-white rounded-3xl p-5 shadow-[0_8px_32px_rgba(45,95,95,0.06)] flex gap-4 fade-up hover:-translate-y-0.5 hover:shadow-[0_12px_40px_rgba(45,95,95,0.12)] transition"
+              >
+                <img src={p.image} alt={p.name} className="w-20 h-20 rounded-2xl object-cover shrink-0" />
                 <div className="flex-1 min-w-0">
-                  <div className="flex items-center justify-between">
-                    <div className="font-medium text-[#1C302B] flex items-center gap-1.5"><MapPin size={14} className="text-[#2D5F5F]" /> {p.name}</div>
-                    <div className="text-xs text-[#7A9690]">{p.distance}</div>
+                  <div className="flex items-center justify-between gap-2">
+                    <div className="font-medium text-[#1C302B] flex items-center gap-1.5 truncate">
+                      <MapPin size={14} className="text-[#2D5F5F] shrink-0" /> {p.name}
+                    </div>
+                    <div className="flex items-center gap-2 shrink-0">
+                      <span className="text-xs text-[#7A9690]">{p.distance}</span>
+                      <button
+                        onClick={(ev) => toggleBookmark(p, ev)}
+                        className={`p-1.5 rounded-full transition ${p.bookmarked ? "bg-[#FCEFEB] text-[#C06C5B]" : "hover:bg-[#F4F7F4] text-[#7A9690]"}`}
+                        data-testid={`bookmark-${p.place_id}`}
+                        aria-label="Toggle bookmark"
+                      >
+                        <Heart size={14} fill={p.bookmarked ? "currentColor" : "none"} />
+                      </button>
+                    </div>
                   </div>
                   <div className="text-xs text-[#7A9690] mt-0.5">{p.subtitle}</div>
                   <div className="flex flex-wrap gap-1.5 mt-2">
@@ -114,29 +204,35 @@ export default function HealingMapPage() {
                     ))}
                   </div>
                 </div>
-              </div>
+              </button>
             ))}
           </div>
         </div>
 
         <div className="lg:col-span-3">
-          <div className="rounded-3xl overflow-hidden h-[420px] sm:h-[520px] shadow-[0_8px_32px_rgba(45,95,95,0.10)] border border-[#D8E6DD]" data-testid="leaflet-map-container">
-            <MapContainer center={center} zoom={userPos ? 14 : 13} scrollWheelZoom={true} key={userPos ? `${userPos.lat}-${userPos.lng}` : "default"} style={{ height: "100%", width: "100%" }}>
+          <div className="rounded-3xl overflow-hidden h-[420px] sm:h-[560px] shadow-[0_8px_32px_rgba(45,95,95,0.10)] border border-[#D8E6DD] sticky top-20" data-testid="leaflet-map-container">
+            <MapContainer center={initialCenter} zoom={userPos ? 14 : 13} scrollWheelZoom={true} style={{ height: "100%", width: "100%" }}>
               <TileLayer
                 attribution='&copy; OpenStreetMap'
                 url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
               />
+              <MapFlyTo target={flyTarget} />
               {userPos && (
                 <CircleMarker center={[userPos.lat, userPos.lng]} radius={9} pathOptions={{ color: "#2D5F5F", fillColor: "#2D5F5F", fillOpacity: 0.6 }}>
                   <Popup>Lokasi kamu</Popup>
                 </CircleMarker>
               )}
               {parks.map((p) => (
-                <Marker key={p.place_id} position={[p.lat, p.lng]}>
+                <Marker
+                  key={p.place_id}
+                  position={[p.lat, p.lng]}
+                  ref={(ref) => { if (ref) markerRefs.current[p.place_id] = ref; }}
+                >
                   <Popup>
                     <div className="font-medium">{p.name}</div>
                     <div className="text-xs">{p.subtitle}</div>
                     {p.distance_km != null && <div className="text-xs mt-1">📍 {p.distance}</div>}
+                    {p.bookmarked && <div className="text-xs mt-1 text-[#C06C5B]">❤️ Bookmarked</div>}
                   </Popup>
                 </Marker>
               ))}

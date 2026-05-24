@@ -123,9 +123,12 @@ class TestAuth:
 # ---------------- Mood ----------------
 class TestMood:
     def test_create_and_list_mood(self, new_user_session):
-        r = new_user_session.post(f"{API}/mood", json={"mood": "calm", "note": "TEST_mood"}, timeout=10)
+        # Iter4: response now {entry, journal_entry}; with a note, journal_entry is created.
+        r = new_user_session.post(f"{API}/mood", json={"mood": "calm", "note": "TEST_mood"}, timeout=30)
         assert r.status_code == 200, r.text
-        entry = r.json()
+        body = r.json()
+        assert "entry" in body and "journal_entry" in body
+        entry = body["entry"]
         assert entry["mood"] == "calm"
         assert entry["note"] == "TEST_mood"
         assert entry["entry_id"].startswith("mood_")

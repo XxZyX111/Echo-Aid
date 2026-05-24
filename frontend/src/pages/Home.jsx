@@ -82,10 +82,15 @@ export default function Home() {
     setSaving(true);
     try {
       const { data } = await api.post("/mood", { mood: selectedMood, note });
-      setMoods((m) => [data, ...m]);
+      const moodEntry = data.entry || data; // backward-compat
+      setMoods((m) => [moodEntry, ...m]);
       setSelectedMood(null);
       setNote("");
-      toast.success("Mood tersimpan di sanctuary 🌿");
+      if (data.journal_entry) {
+        toast.success("Mood + curhatan tersimpan ke Journal 🌿");
+      } else {
+        toast.success("Mood tersimpan di sanctuary 🌿");
+      }
     } catch (e) {
       toast.error("Gagal menyimpan mood");
     } finally {
@@ -93,10 +98,13 @@ export default function Home() {
     }
   };
 
-  // Build chart data: last 7 days mood score + simulated stress
+  // Build chart data: last 7 days mood, stress (inverse), cortisol (simulated body indicator)
+  // All on a 1-5 wellness scale.
   const chartData = useMemo(() => {
-    const score = { grateful: 5, calm: 4, neutral: 3, low: 2, anxious: 1 };
-    const stress = { grateful: 1, calm: 2, neutral: 3, low: 4, anxious: 5 };
+    const moodScore = { grateful: 5, calm: 4, neutral: 3, low: 2, anxious: 1 };
+    const stressScore = { grateful: 1, calm: 2, neutral: 3, low: 4, anxious: 5 };
+    // Cortisol is a simulated body indicator (lower = calmer body)
+    const cortisolScore = { grateful: 1.5, calm: 2, neutral: 2.8, low: 4, anxious: 4.5 };
     const days = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
     const today = new Date();
     return days.map((d, i) => {
@@ -106,8 +114,9 @@ export default function Home() {
       const m = moods.find((x) => (x.created_at || "").slice(0, 10) === dayStr);
       return {
         day: d,
-        sleep: m ? score[m.mood] : 3 + ((i * 7) % 3) - 1,
-        stress: m ? stress[m.mood] : 2 + ((i * 5) % 3),
+        mood: m ? moodScore[m.mood] : 3 + ((i * 7) % 3) - 1,
+        stress: m ? stressScore[m.mood] : 2 + ((i * 5) % 3),
+        cortisol: m ? cortisolScore[m.mood] : 2.5 + ((i * 3) % 3) * 0.5,
       };
     });
   }, [moods]);
@@ -190,24 +199,51 @@ export default function Home() {
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-5 mt-5">
         <div className="lg:col-span-2 bg-white rounded-3xl p-6 shadow-[0_8px_32px_rgba(45,95,95,0.06)] fade-up" data-testid="health-correlation-card">
-          <div className="flex items-center justify-between mb-3">
-            <h3 className="text-lg font-semibold text-[#1C302B]">Health Correlation</h3>
-            <div className="flex items-center gap-3 text-xs text-[#4A635D]">
+          <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
+            <div>
+              <h3 className="text-lg font-semibold text-[#1C302B]">Health Correlation</h3>
+              <p className="text-xs text-[#7A9690] mt-0.5">7-day wellness biomarker trend (scale 1–5)</p>
+            </div>
+            <div className="flex items-center gap-3 text-xs text-[#4A635D] flex-wrap">
               <span className="flex items-center gap-1.5"><span className="w-2 h-2 rounded-full bg-[#2D5F5F]" /> Mood</span>
               <span className="flex items-center gap-1.5"><span className="w-2 h-2 rounded-full bg-[#C06C5B]" /> Stress</span>
+              <span className="flex items-center gap-1.5"><span className="w-2 h-2 rounded-full bg-[#B98A3D]" /> Cortisol</span>
             </div>
           </div>
-          <div className="h-56">
+          <div className="h-64">
             <ResponsiveContainer width="100%" height="100%">
-              <LineChart data={chartData} margin={{ top: 10, right: 12, left: 0, bottom: 0 }}>
+              <LineChart data={chartData} margin={{ top: 10, right: 12, left: 4, bottom: 4 }}>
                 <CartesianGrid strokeDasharray="3 6" stroke="#E8F0EA" />
                 <XAxis dataKey="day" stroke="#7A9690" tickLine={false} axisLine={false} fontSize={12} />
-                <YAxis hide domain={[0, 6]} />
-                <Tooltip contentStyle={{ borderRadius: 12, border: "1px solid #D8E6DD" }} />
-                <Line type="monotone" dataKey="sleep" stroke="#2D5F5F" strokeWidth={2.4} dot={{ r: 3 }} />
-                <Line type="monotone" dataKey="stress" stroke="#C06C5B" strokeWidth={2.4} dot={{ r: 3 }} />
+                <YAxis
+                  stroke="#7A9690"
+                  tickLine={false}
+                  axisLine={false}
+                  fontSize={11}
+                  domain={[0, 5]}
+                  ticks={[1, 2, 3, 4, 5]}
+                  width={28}
+                  label={{
+                    value: "Level",
+                    angle: -90,
+                    position: "insideLeft",
+                    style: { fill: "#7A9690", fontSize: 11, textAnchor: "middle" },
+                  }}
+                />
+                <Tooltip
+                  contentStyle={{ borderRadius: 12, border: "1px solid #D8E6DD", fontSize: 12 }}
+                  formatter={(value, name) => [Number(value).toFixed(1), name.charAt(0).toUpperCase() + name.slice(1)]}
+                />
+                <Line type="monotone" dataKey="mood" name="mood" stroke="#2D5F5F" strokeWidth={2.4} dot={{ r: 3 }} />
+                <Line type="monotone" dataKey="stress" name="stress" stroke="#C06C5B" strokeWidth={2.4} dot={{ r: 3 }} />
+                <Line type="monotone" dataKey="cortisol" name="cortisol" stroke="#B98A3D" strokeWidth={2.2} strokeDasharray="6 4" dot={{ r: 3 }} />
               </LineChart>
             </ResponsiveContainer>
+          </div>
+          <div className="mt-3 grid grid-cols-3 gap-2 text-[11px] text-[#7A9690]">
+            <div className="bg-[#F4F7F4] rounded-xl p-2.5"><div className="text-[#2D5F5F] font-semibold">Mood</div>Subjective wellness 1-5</div>
+            <div className="bg-[#F4F7F4] rounded-xl p-2.5"><div className="text-[#C06C5B] font-semibold">Stress</div>Inverse mood signal</div>
+            <div className="bg-[#F4F7F4] rounded-xl p-2.5"><div className="text-[#B98A3D] font-semibold">Cortisol</div>Simulated body load</div>
           </div>
         </div>
 
