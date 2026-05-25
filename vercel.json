@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "experimentalServices": {
@@ -13,4 +14,19 @@
       "entrypoint": "server.py"
     }
   }
+=======
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "experimentalServices": {
+    "frontend": {
+      "root": "frontend",
+      "routePrefix": "/",
+      "framework": "create-react-app"
+    },
+    "backend": {
+      "root": "backend",
+      "routePrefix": "/_/backend"
+    }
+  }
+>>>>>>> 0fd0327bb0de07a0172cfdf8dab943bf72ff90bf
 }
